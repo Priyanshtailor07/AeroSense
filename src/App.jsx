@@ -21,6 +21,28 @@ export default function App() {
   const [isAlarmMuted, setIsAlarmMuted] = useState(false);
   const [isAlarmActive, setIsAlarmActive] = useState(true);
 
+  // Dark / Light Theme Mode State with persistence
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('aerosense_theme');
+      if (saved) return saved === 'dark';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      document.body.classList.add('dark');
+      localStorage.setItem('aerosense_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.body.classList.remove('dark');
+      localStorage.setItem('aerosense_theme', 'light');
+    }
+  }, [isDarkMode]);
+
   // Dynamic Ambient Theme based on strict priority
   const isHazard = aqi > 150 || pm25 > 55;
   const theme = getEnvironmentalTheme(aqi, humidity, pm25);
@@ -114,9 +136,11 @@ export default function App() {
   }));
 
   const showScreenStrobe = isHazard && isAlarmActive && !isAlarmMuted;
+  const currentBgGradient = isDarkMode ? theme.darkBgGradient : theme.bgGradient;
+  const currentTextColor = isDarkMode ? 'text-slate-100' : 'text-slate-900';
 
   return (
-    <div className={`min-h-screen bg-gradient-to-br ${theme.bgGradient} transition-all duration-700 relative overflow-x-hidden p-3 sm:p-6 text-slate-900`}>
+    <div className={`min-h-screen bg-gradient-to-br ${currentBgGradient} transition-all duration-700 relative overflow-x-hidden p-3 sm:p-6 ${currentTextColor}`}>
       {/* 1. Dynamic Flashing Screen Perimeter Hazard Strobe (Turns OFF completely when alarm is stopped) */}
       {showScreenStrobe && (
         <div className="fixed inset-0 pointer-events-none z-50 hazard-active-border" />
@@ -210,6 +234,8 @@ export default function App() {
           theme={theme}
           aqi={aqi}
           humidity={humidity}
+          isDarkMode={isDarkMode}
+          setIsDarkMode={setIsDarkMode}
         />
 
         {/* Tab Modules */}
@@ -231,6 +257,7 @@ export default function App() {
               setIsLiveStreaming={setIsLiveStreaming}
               onReset={handleReset}
               onOpenHepa={() => setActiveTab('hepa')}
+              isDarkMode={isDarkMode}
             />
           )}
 
@@ -249,17 +276,17 @@ export default function App() {
         </main>
 
         {/* Global Footer with Company Trademark */}
-        <footer className="mt-12 pt-6 border-t border-slate-200/80 text-xs text-slate-600 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <footer className="mt-12 pt-6 border-t border-slate-200/80 dark:border-slate-800/80 text-xs text-slate-600 dark:text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-extrabold text-slate-900 tracking-tight text-sm">Built by 80085</span>
-            <span className="text-slate-800 font-mono text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 border border-slate-300">
+            <span className="font-extrabold text-slate-900 dark:text-white tracking-tight text-sm">Built by 80085</span>
+            <span className="text-slate-800 dark:text-slate-200 font-mono text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700">
               Company Trademark
             </span>
-            <span className="text-slate-400">•</span>
+            <span className="text-slate-400 dark:text-slate-600">•</span>
             <span className="font-medium">AeroSense Planetary Environmental Intelligence Engine</span>
           </div>
 
-          <div className="flex items-center gap-4 text-slate-500 font-mono text-[11px] font-bold">
+          <div className="flex items-center gap-4 text-slate-500 dark:text-slate-400 font-mono text-[11px] font-bold">
             <span>© 2026 Built by 80085</span>
             <span>•</span>
             <span>All Rights Reserved</span>

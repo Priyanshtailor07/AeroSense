@@ -1,72 +1,98 @@
 import React from 'react';
-import { BookOpen, ShieldAlert, Cpu, CheckCircle2 } from 'lucide-react';
+import { BookOpen, ShieldAlert, Cpu, Zap, Wind } from 'lucide-react';
 
 export default function ScientificOverview() {
   return (
-    <div className="glass-panel rounded-2xl p-5 border border-white/80 shadow-sm mt-6">
-      <div className="flex items-center gap-2.5 pb-4 border-b border-slate-200/60">
-        <div className="p-2 rounded-xl bg-indigo-50 text-indigo-700">
+    <div className="glass-panel rounded-2xl p-5 border border-white/80 dark:border-slate-800 shadow-sm mt-6">
+      <div className="flex items-center gap-2.5 pb-4 border-b border-slate-200/60 dark:border-slate-800/80">
+        <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400">
           <BookOpen className="w-4 h-4" />
         </div>
         <div>
-          <h3 className="text-sm font-bold text-slate-800 tracking-tight">Scientific Standards & Priority Architecture</h3>
-          <p className="text-xs text-slate-500">Engineering guidelines conforming to EPA, ASHRAE 62.1 & HEPA H13 standards</p>
+          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 tracking-tight">
+            AirTrack Mathematical Dynamics & ASHRAE 62.1 Scientific Standards
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Autonomous closed-loop AQI-to-HVAC multi-variable tradeoff differential equations
+          </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
-        {/* Metric Standards Card */}
-        <div className="bg-white/60 rounded-xl p-4 border border-slate-200/50">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-700 mb-2">
-            <Cpu className="w-4 h-4 text-emerald-600" />
-            <span>Mathematical & Metric Formulations</span>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
+        {/* Formula 1: CO2 Mass Balance */}
+        <div className="bg-white/70 dark:bg-slate-900/60 rounded-xl p-4 border border-slate-200/60 dark:border-slate-800 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 mb-2">
+              <Wind className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>1. Indoor CO₂ Mass Balance</span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-indigo-50/80 dark:bg-slate-900 text-indigo-950 dark:text-emerald-400 border border-indigo-200/60 dark:border-slate-800 font-mono text-[11px] font-semibold mb-2 leading-relaxed overflow-x-auto shadow-2xs">
+              d[CO₂]/dt = (N·V̇_co₂)/V - (Q_fresh/V)([CO₂] - [CO₂]_amb)
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-tight">
+              Scaled dynamically to room volume V and occupant exhalation rate (0.0187 m³/h/person).
+            </p>
           </div>
-          <ul className="text-xs space-y-2 text-slate-600">
-            <li className="flex items-start gap-1.5">
-              <span className="text-slate-400 font-mono">•</span>
-              <span><strong>PM2.5 Density:</strong> Expressed in µg/m³ (micrograms per cubic meter, particles ≤ 2.5 µm).</span>
-            </li>
-            <li className="flex items-start gap-1.5">
-              <span className="text-slate-400 font-mono">•</span>
-              <span><strong>HEPA Efficiency:</strong> η = 99.97% at Most Penetrating Particle Size (0.3 µm MPPS).</span>
-            </li>
-            <li className="flex items-start gap-1.5">
-              <span className="text-slate-400 font-mono">•</span>
-              <span><strong>Relative Humidity:</strong> Expressed in % RH at ambient reference temperature.</span>
-            </li>
-          </ul>
+          <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-500 mt-2 block">
+            Target: &lt; 900 ppm
+          </span>
         </div>
 
-        {/* Priority Evaluation Cascade */}
-        <div className="bg-white/60 rounded-xl p-4 border border-slate-200/50">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-700 mb-2">
-            <ShieldAlert className="w-4 h-4 text-rose-600" />
-            <span>Strict Ambient Priority Rules</span>
+        {/* Formula 2: PM2.5 Particulate Balance */}
+        <div className="bg-white/70 dark:bg-slate-900/60 rounded-xl p-4 border border-slate-200/60 dark:border-slate-800 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 mb-2">
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+              <span>2. PM2.5 Mass Balance</span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-rose-50/80 dark:bg-slate-900 text-rose-950 dark:text-rose-300 border border-rose-200/60 dark:border-slate-800 font-mono text-[11px] font-semibold mb-2 leading-relaxed overflow-x-auto shadow-2xs">
+              d[PM₂.₅]/dt = (Q_fresh·PM_out)/V - ((Q·η_hepa + Q_dep)/V)·PM_in + leak
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-tight">
+              HEPA efficiency η = 99.97% at 0.3 µm MPPS, envelope infiltration leak, and surface deposition.
+            </p>
           </div>
-          <ol className="text-xs space-y-2 text-slate-600 list-decimal list-inside">
-            <li className="text-rose-700 font-medium">
-              <strong>Priority 1:</strong> Critical Hazard (AQI &gt; 150 or PM2.5 &gt; 55 µg/m³) overrides all other modes.
-            </li>
-            <li className="text-sky-700 font-medium">
-              <strong>Priority 2:</strong> High Humidity (Humidity &gt; 75%) triggers precipitation & moisture state.
-            </li>
-            <li className="text-emerald-700 font-medium">
-              <strong>Priority 3:</strong> Clean Air (AQI ≤ 50) invokes tranquil Mint/Sage palette.
-            </li>
-          </ol>
+          <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-500 mt-2 block">
+            WHO Safe: &lt; 15.0 µg/m³
+          </span>
         </div>
 
-        {/* Filtration Mechanisms Summary */}
-        <div className="bg-white/60 rounded-xl p-4 border border-slate-200/50">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-700 mb-2">
-            <CheckCircle2 className="w-4 h-4 text-indigo-600" />
-            <span>HEPA Filtration Mechanisms</span>
+        {/* Formula 3: Darcy-Forchheimer Filter DP */}
+        <div className="bg-white/70 dark:bg-slate-900/60 rounded-xl p-4 border border-slate-200/60 dark:border-slate-800 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 mb-2">
+              <Cpu className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span>3. Darcy-Forchheimer Dust Loading</span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-amber-50/80 dark:bg-slate-900 text-amber-950 dark:text-amber-300 border border-amber-200/60 dark:border-slate-800 font-mono text-[11px] font-semibold mb-2 leading-relaxed overflow-x-auto shadow-2xs">
+              ΔP = ΔP_clean · (Q/Q_max) · (1 + 2.8·[M_dust/M_max]^1.8)
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-tight">
+              Exponential pressure drop rise across the HEPA filter cake as particulate mass accumulates.
+            </p>
           </div>
-          <div className="text-xs space-y-1.5 text-slate-600">
-            <div><strong>1. Interception:</strong> Medium particles (0.1–1.0 µm) follow streamlines and adhere to fibers.</div>
-            <div><strong>2. Inertial Impaction:</strong> Heavy particles (&gt; 1.0 µm) slam directly due to linear momentum.</div>
-            <div><strong>3. Brownian Diffusion:</strong> Ultra-fine particles (&lt; 0.1 µm) collide with gas molecules in random walks.</div>
+          <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-500 mt-2 block">
+            Clean: 120 Pa | Clogged: 340 Pa
+          </span>
+        </div>
+
+        {/* Formula 4: Fan Affinity Cubic Power Law */}
+        <div className="bg-white/70 dark:bg-slate-900/60 rounded-xl p-4 border border-slate-200/60 dark:border-slate-800 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 mb-2">
+              <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>4. Fan Affinity Cubic Law</span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-emerald-50/80 dark:bg-slate-900 text-emerald-950 dark:text-cyan-300 border border-emerald-200/60 dark:border-slate-800 font-mono text-[11px] font-semibold mb-2 leading-relaxed overflow-x-auto shadow-2xs">
+              P_fan = P_base · (RPM/RPM_max)³ · (ΔP/ΔP_clean)
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-tight">
+              Blower power grows with the cube of fan speed. Running 100% vs 50% consumes 800% more energy!
+            </p>
           </div>
+          <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-500 mt-2 block">
+            P ∝ RPM³ (Cubic Law)
+          </span>
         </div>
       </div>
     </div>

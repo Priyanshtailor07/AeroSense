@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUpRight, ArrowDownRight, Info } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight } from 'lucide-react';
 
 export default function MetricCard({
   title,
@@ -16,37 +16,41 @@ export default function MetricCard({
   accentColor = '#10b981',
 }) {
   const percentage = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
-  
+
   // Calculate mini sparkline SVG path
   const width = 110;
   const height = 28;
-  const points = history.map((val, idx) => {
-    const x = (idx / (history.length - 1)) * width;
-    const norm = (val - min) / (max - min || 1);
-    const y = height - Math.max(4, Math.min(height - 4, norm * height));
-    return `${x},${y}`;
-  }).join(' ');
+  const points = history
+    .map((val, idx) => {
+      const x = (idx / (history.length - 1)) * width;
+      const norm = (val - min) / (max - min || 1);
+      const y = height - Math.max(4, Math.min(height - 4, norm * height));
+      return `${x},${y}`;
+    })
+    .join(' ');
 
   const isTrendingUp = history[history.length - 1] >= history[0];
 
   return (
-    <div className="glass-card rounded-2xl p-5 border border-white/70 shadow-sm hover:shadow-md transition-all duration-300 relative group flex flex-col justify-between">
+    <div className="glass-card rounded-2xl p-5 border border-white/70 dark:border-slate-800 shadow-sm hover:shadow-md transition-all duration-300 relative group flex flex-col justify-between">
       {/* Top Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-2.5">
-          <div 
+          <div
             className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-105"
             style={{ backgroundColor: `${accentColor}18`, color: accentColor }}
           >
             <Icon className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">{title}</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              {title}
+            </h3>
             <div className="flex items-baseline gap-1 mt-0.5">
-              <span className="text-2xl font-extrabold tracking-tight text-slate-900 font-mono">
+              <span className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white font-mono">
                 {typeof value === 'number' ? value.toLocaleString() : value}
               </span>
-              <span className="text-xs font-medium text-slate-500 font-sans">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400 font-sans">
                 {unit}
               </span>
             </div>
@@ -60,26 +64,26 @@ export default function MetricCard({
 
       {/* Progress Bar & Visual Gauge */}
       <div className="my-3.5">
-        <div className="flex justify-between items-center text-[10px] text-slate-400 mb-1 font-mono">
+        <div className="flex justify-between items-center text-[10px] text-slate-400 dark:text-slate-500 mb-1 font-mono">
           <span>{min}</span>
-          <span className="text-slate-500 font-sans italic">{latexUnit || unit}</span>
+          <span className="text-slate-500 dark:text-slate-400 font-sans italic">{latexUnit || unit}</span>
           <span>{max}</span>
         </div>
-        <div className="w-full h-2 rounded-full bg-slate-200/60 overflow-hidden p-0.5">
-          <div 
+        <div className="w-full h-2 rounded-full bg-slate-200/60 dark:bg-slate-700/60 overflow-hidden p-0.5">
+          <div
             className="h-full rounded-full transition-all duration-500"
-            style={{ 
+            style={{
               width: `${percentage}%`,
               backgroundColor: accentColor,
-              boxShadow: `0 0 10px ${accentColor}80`
+              boxShadow: `0 0 10px ${accentColor}80`,
             }}
           />
         </div>
       </div>
 
       {/* Sparkline & Context Footer */}
-      <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-        <div className="text-[11px] text-slate-500 flex items-center gap-1">
+      <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+        <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
           {isTrendingUp ? (
             <span className="flex items-center text-rose-500 font-medium">
               <ArrowUpRight className="w-3 h-3" /> +Live
