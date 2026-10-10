@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Wind, Flame, Activity, Zap, ShieldCheck, DollarSign } from 'lucide-react';
+import { Wind, Flame, Activity, Zap, ShieldCheck, DollarSign, Server, Radio, AlertTriangle } from 'lucide-react';
 import AmbientAlertBar from './AmbientAlertBar';
 import MetricCard from './MetricCard';
 import HvacDigitalTwin3D from './HvacDigitalTwin3D';
@@ -20,13 +20,33 @@ export default function AeroDashboard({
   setPm25,
   temp,
   setTemp,
+  damperPct: propsDamperPct = 20.0,
+  setDamperPct: setPropsDamperPct,
+  recommendedDamperPct = 20.0,
+  fanSpeedPct: propsFanSpeedPct = 28.0,
+  setFanSpeedPct: setPropsFanSpeedPct,
+  fanPowerKw: propsFanPowerKw = 0.85,
+  filterHealthPct: propsFilterHealthPct = 97.2,
+  currentDpPa: propsCurrentDpPa = 130,
+  cumulativeEnergyKwh: propsCumulativeEnergyKwh = 0.08,
+  cumulativeCostUsd: propsCumulativeCostUsd = 0.04,
+  rationale: propsRationale = '',
+  recommendationOnly = true,
+  sparklines = {},
+  liveAlerts = [],
+  mode = 'simulation',
+  selectedZone = 'Zone-1',
+  isApiLoading = false,
+  isStale = false,
+  lastUpdated = null,
+  onRetry,
   isLiveStreaming,
   setIsLiveStreaming,
   onReset,
   onOpenHepa,
   isDarkMode = false,
 }) {
-  // Physical Simulation Parameters (from Manan)
+  // Physical Simulation Parameters (Active ONLY in Local Simulation Mode)
   const [roomPreset, setRoomPreset] = useState('office');
   const [roomVolM3, setRoomVolM3] = useState(500.0);
   const [ceilingHeightM, setCeilingHeightM] = useState(3.5);
@@ -45,24 +65,24 @@ export default function AeroDashboard({
   const [isPeakTariff, setIsPeakTariff] = useState(false);
   const [filterState, setFilterState] = useState('clean');
 
-  // Dynamic Physical State
-  const [damperPct, setDamperPct] = useState(20.0);
-  const [fanSpeedPct, setFanSpeedPct] = useState(28.0);
+  // Local Physical Simulation State (used when mode === 'simulation')
+  const [localDamperPct, setLocalDamperPct] = useState(20.0);
+  const [localFanSpeedPct, setLocalFanSpeedPct] = useState(28.0);
   const [accumulatedDustG, setAccumulatedDustG] = useState(22.0);
-  const [filterHealthPct, setFilterHealthPct] = useState(97.2);
-  const [currentDpPa, setCurrentDpPa] = useState(130.0);
-  const [fanPowerKw, setFanPowerKw] = useState(0.85);
-  const [cumulativeEnergyKwh, setCumulativeEnergyKwh] = useState(0.08);
-  const [cumulativeCostUsd, setCumulativeCostUsd] = useState(0.04);
-  const [rationale, setRationale] = useState(
-    'Telemetry initialized: Closed-loop multi-variable optimizer balancing indoor particulate, CO₂ accumulation, and fan energy.'
+  const [localFilterHealthPct, setLocalFilterHealthPct] = useState(97.2);
+  const [localCurrentDpPa, setLocalCurrentDpPa] = useState(130.0);
+  const [localFanPowerKw, setLocalFanPowerKw] = useState(0.85);
+  const [localCumulativeEnergyKwh, setLocalCumulativeEnergyKwh] = useState(0.08);
+  const [localCumulativeCostUsd, setLocalCumulativeCostUsd] = useState(0.04);
+  const [localRationale, setLocalRationale] = useState(
+    'Local Simulation initialized: Closed-loop multi-variable optimizer active.'
   );
 
-  // Sparkline Histories
-  const [pm25History, setPm25History] = useState([8.2, 8.4, 8.5, 8.3, 8.6, 8.4, 8.5]);
-  const [co2History, setCo2History] = useState([640, 645, 652, 648, 655, 650, 650]);
-  const [powerHistory, setPowerHistory] = useState([0.82, 0.84, 0.85, 0.83, 0.86, 0.85, 0.85]);
-  const [filterHistory, setFilterHistory] = useState([98.0, 97.8, 97.6, 97.5, 97.4, 97.3, 97.2]);
+  // Sparkline Histories for Local Simulation
+  const [localPm25History, setLocalPm25History] = useState([8.2, 8.4, 8.5, 8.3, 8.6, 8.4, 8.5]);
+  const [localCo2History, setLocalCo2History] = useState([640, 645, 652, 648, 655, 650, 650]);
+  const [localPowerHistory, setLocalPowerHistory] = useState([0.82, 0.84, 0.85, 0.83, 0.86, 0.85, 0.85]);
+  const [localFilterHistory, setLocalFilterHistory] = useState([98.0, 97.8, 97.6, 97.5, 97.4, 97.3, 97.2]);
 
   // Physical Constants
   const MAX_AIRFLOW_M3H = 3600.0;
@@ -72,8 +92,9 @@ export default function AeroDashboard({
   const CLEAN_DP_PA = 120.0;
   const FILTER_REPLACE_COST_USD = 650.0;
 
-  // Sync Scenario changes with realistic initial surges
+  // Sync Scenario changes with realistic initial surges in simulation mode
   useEffect(() => {
+    if (mode === 'aws_live') return;
     if (airScenario === 'extreme') {
       setAmbientPM25(495.0);
       setAqi(500);
@@ -91,50 +112,28 @@ export default function AeroDashboard({
       setAqi(45);
       setPm25(7.5);
     }
-  }, [airScenario]);
+  }, [airScenario, mode, setAqi, setPm25]);
 
-  // Sync Filter State presets
+  // Sync Filter State presets in simulation mode
   useEffect(() => {
+    if (mode === 'aws_live') return;
     if (filterState === 'clean') {
       setAccumulatedDustG(0.0);
-      setFilterHealthPct(100.0);
-      setCurrentDpPa(CLEAN_DP_PA);
+      setLocalFilterHealthPct(100.0);
+      setLocalCurrentDpPa(CLEAN_DP_PA);
     } else if (filterState === 'seasoned') {
       setAccumulatedDustG(280.0);
-      setFilterHealthPct(65.0);
-      setCurrentDpPa(195.0);
+      setLocalFilterHealthPct(65.0);
+      setLocalCurrentDpPa(195.0);
     } else if (filterState === 'clogged') {
       setAccumulatedDustG(620.0);
-      setFilterHealthPct(22.5);
-      setCurrentDpPa(340.0);
+      setLocalFilterHealthPct(22.5);
+      setLocalCurrentDpPa(340.0);
     }
-  }, [filterState]);
+  }, [filterState, mode]);
 
-  // Ref container for latest state inside simulation interval
-  const stateRef = useRef({
-    roomVolM3,
-    ceilingHeightM,
-    targetCO2Max,
-    infiltrationAch,
-    occupancy,
-    ambientPM25,
-    ambientCO2,
-    indoorPM25: pm25,
-    indoorCO2: co2,
-    controlMode,
-    manualDamper,
-    manualFan,
-    damperPct,
-    fanSpeedPct,
-    accumulatedDustG,
-    filterHealthPct,
-    currentDpPa,
-    fanPowerKw,
-    cumulativeEnergyKwh,
-    cumulativeCostUsd,
-    isPeakTariff,
-  });
-
+  // Ref container for latest state inside local simulation interval
+  const stateRef = useRef({});
   useEffect(() => {
     stateRef.current = {
       roomVolM3,
@@ -149,14 +148,14 @@ export default function AeroDashboard({
       controlMode,
       manualDamper,
       manualFan,
-      damperPct,
-      fanSpeedPct,
+      damperPct: localDamperPct,
+      fanSpeedPct: localFanSpeedPct,
       accumulatedDustG,
-      filterHealthPct,
-      currentDpPa,
-      fanPowerKw,
-      cumulativeEnergyKwh,
-      cumulativeCostUsd,
+      filterHealthPct: localFilterHealthPct,
+      currentDpPa: localCurrentDpPa,
+      fanPowerKw: localFanPowerKw,
+      cumulativeEnergyKwh: localCumulativeEnergyKwh,
+      cumulativeCostUsd: localCumulativeCostUsd,
       isPeakTariff,
     };
   }, [
@@ -172,19 +171,21 @@ export default function AeroDashboard({
     controlMode,
     manualDamper,
     manualFan,
-    damperPct,
-    fanSpeedPct,
+    localDamperPct,
+    localFanSpeedPct,
     accumulatedDustG,
-    filterHealthPct,
-    currentDpPa,
-    fanPowerKw,
-    cumulativeEnergyKwh,
-    cumulativeCostUsd,
+    localFilterHealthPct,
+    localCurrentDpPa,
+    localFanPowerKw,
+    localCumulativeEnergyKwh,
+    localCumulativeCostUsd,
     isPeakTariff,
   ]);
 
-  // Real-Time Physics & Closed-Loop Controller Loop (1 tick / sec)
+  // 1 Tick / Sec Physics Loop - RUNS ONLY IN LOCAL SIMULATION MODE
   useEffect(() => {
+    if (mode === 'aws_live') return; // DO NOT OVERWRITE AWS LIVE TELEMETRY
+
     const interval = setInterval(() => {
       const s = stateRef.current;
       const dtHr = 1.0 / 3600.0;
@@ -202,12 +203,11 @@ export default function AeroDashboard({
         if (s.indoorCO2 > s.targetCO2Max) {
           nextDamper = 75.0;
           nextFan = 85.0;
-          currentRationale = `Static BMS Rule: CO₂ target crossed (>${s.targetCO2Max} ppm). Forcing 75% fresh outdoor damper intake irrespective of outdoor smog level.`;
+          currentRationale = `Static BMS Rule: CO₂ target crossed (>${s.targetCO2Max} ppm). Forcing 75% fresh outdoor damper intake.`;
         } else if (s.indoorPM25 > 25.0) {
           nextDamper = 20.0;
           nextFan = 100.0;
-          currentRationale =
-            'Static BMS Rule: PM₂.₅ above 25 µg/m³. Operating fan at maximum 100% capacity (exponential cubic power draw).';
+          currentRationale = 'Static BMS Rule: PM₂.₅ above 25 µg/m³. Operating fan at maximum 100% capacity.';
         } else {
           nextDamper = 35.0;
           nextFan = 60.0;
@@ -223,34 +223,22 @@ export default function AeroDashboard({
         if (s.ambientPM25 > 280.0) {
           if (s.indoorCO2 > s.targetCO2Max + 30.0) {
             targetDamper = 12.0;
-            reasonVent = `Severe outdoor smog (${s.ambientPM25.toFixed(0)} µg/m³): Micro-pulsing fresh damper to 12% to cap CO₂ under ${s.targetCO2Max} ppm in ${s.roomVolM3}m³ space.`;
+            reasonVent = `Severe outdoor smog (${s.ambientPM25.toFixed(0)} µg/m³): Micro-pulsing fresh damper to 12% to cap CO₂.`;
           } else {
             targetDamper = 3.0;
-            reasonVent = `Severe outdoor smog (${s.ambientPM25.toFixed(0)} µg/m³): Protective shield active. Throttled damper to 3% to block particulate ingress into room.`;
+            reasonVent = `Severe outdoor smog (${s.ambientPM25.toFixed(0)} µg/m³): Protective shield active. Throttled damper to 3%.`;
           }
         } else if (s.ambientPM25 > 90.0) {
-          if (s.indoorCO2 > s.targetCO2Max - 50.0) {
-            targetDamper = 22.0;
-          } else {
-            targetDamper = 12.0;
-          }
+          targetDamper = s.indoorCO2 > s.targetCO2Max - 50.0 ? 22.0 : 12.0;
           reasonVent = `Moderate outdoor particulate (${s.ambientPM25.toFixed(0)} µg/m³): Regulating fresh damper at ${targetDamper}%.`;
         } else {
-          if (s.indoorCO2 > s.targetCO2Max - 100.0) {
-            targetDamper = 45.0;
-          } else {
-            targetDamper = 25.0;
-          }
-          reasonVent = `Clean outdoor air: Free natural fresh ventilation flush (${targetDamper}% damper).`;
+          targetDamper = s.indoorCO2 > s.targetCO2Max - 100.0 ? 45.0 : 25.0;
+          reasonVent = `Clean outdoor air: Natural fresh ventilation flush (${targetDamper}% damper).`;
         }
 
         if (s.ambientPM25 > 280.0 || s.indoorPM25 > 18.0) {
           targetFan = s.isPeakTariff ? 74.0 : 84.0;
-          if (s.ambientPM25 > 280.0) {
-            reasonFan = `Catastrophic Smog Alert: Engaged POWER SCRUBBING MODE (${targetFan.toFixed(0)}%) to aggressively scrub infiltration leaks.`;
-          } else {
-            reasonFan = `Indoor PM elevated (${s.indoorPM25.toFixed(1)} µg/m³): POWER MODE (${targetFan.toFixed(0)}%) activated to restore safe limit.`;
-          }
+          reasonFan = `High PM: POWER SCRUBBING MODE (${targetFan.toFixed(0)}%) engaged.`;
         } else if (s.ambientPM25 > 90.0 || s.indoorPM25 > 12.0) {
           targetFan = s.isPeakTariff ? 48.0 : 58.0;
           reasonFan = `Moderate particulate: Fan in BALANCED PURIFICATION (${targetFan.toFixed(0)}%).`;
@@ -262,17 +250,12 @@ export default function AeroDashboard({
           reasonFan = `Air pristine: Whisper eco-flow at ${targetFan.toFixed(0)}%.`;
         }
 
-        if (s.isPeakTariff && s.indoorPM25 < 15.0 && s.ambientPM25 <= 280.0) {
-          reasonFan += ' [Grid Peak Tariff: Throttled to cut operating cost]';
-        }
-
-        // Smooth transition
         nextDamper = s.damperPct + (targetDamper - s.damperPct) * 0.25;
         nextFan = s.fanSpeedPct + (targetFan - s.fanSpeedPct) * 0.25;
         currentRationale = `${reasonVent} ${reasonFan}`;
       }
 
-      // 2. Physics Equations
+      // Physics Equations
       const damperFrac = Math.max(0, Math.min(1, nextDamper / 100.0));
       const fanFrac = Math.max(0, Math.min(1, nextFan / 100.0));
 
@@ -280,14 +263,11 @@ export default function AeroDashboard({
       const qFreshM3h = totalAirflowM3h * damperFrac + s.roomVolM3 * s.infiltrationAch;
       const qRecircM3h = totalAirflowM3h * (1.0 - damperFrac);
 
-      // CO2 Balance
       const co2GenM3h = s.occupancy * 0.0187;
-      const co2GenPpmM3h = co2GenM3h * 1e6;
       const deltaCO2 =
-        ((co2GenPpmM3h + qFreshM3h * s.ambientCO2 - qFreshM3h * s.indoorCO2) / s.roomVolM3) * dtHr;
+        ((co2GenM3h * 1e6 + qFreshM3h * s.ambientCO2 - qFreshM3h * s.indoorCO2) / s.roomVolM3) * dtHr;
       const updatedIndoorCO2 = Math.max(s.ambientCO2, s.indoorCO2 + deltaCO2);
 
-      // PM2.5 Balance
       const pmInletMix =
         totalAirflowM3h > 0
           ? (qFreshM3h * s.ambientPM25 + qRecircM3h * s.indoorPM25) / totalAirflowM3h
@@ -302,15 +282,12 @@ export default function AeroDashboard({
         ((s.roomVolM3 * s.infiltrationAch * (s.ambientPM25 - s.indoorPM25)) / s.roomVolM3) * dtHr;
       const updatedIndoorPM = Math.max(1.0, s.indoorPM25 + deltaPM + leakPM);
 
-      // Filter Loading & DP
       const dustCapturedG = pmCapturedUgH * dtHr * 1e-6;
       const updatedAccumulatedDust = s.accumulatedDustG + dustCapturedG * 18.0;
       const loadingRatio = Math.min(1.0, updatedAccumulatedDust / MAX_DUST_CAPACITY_G);
       const updatedFilterHealth = Math.max(0.0, (1.0 - loadingRatio) * 100.0);
-
       const updatedDp = CLEAN_DP_PA * fanFrac * (1.0 + 2.8 * Math.pow(loadingRatio, 1.8));
 
-      // Power & Economics
       const dpRatio = Math.max(1.0, updatedDp / Math.max(1.0, CLEAN_DP_PA * Math.max(0.1, fanFrac)));
       const updatedPowerKw = BASE_FAN_POWER_KW * Math.pow(fanFrac, 3.0) * (0.7 + 0.3 * dpRatio);
 
@@ -321,31 +298,44 @@ export default function AeroDashboard({
       const updatedEnergy = s.cumulativeEnergyKwh + energyKwh;
       const updatedCost = s.cumulativeCostUsd + energyKwh * tariffRate + wearCostUsd;
 
-      // Update States
-      setDamperPct(nextDamper);
-      setFanSpeedPct(nextFan);
-      setRationale(currentRationale);
+      setLocalDamperPct(nextDamper);
+      setLocalFanSpeedPct(nextFan);
+      setLocalRationale(currentRationale);
 
       setPm25(Number(updatedIndoorPM.toFixed(1)));
       setCo2(Math.round(updatedIndoorCO2));
       setAccumulatedDustG(updatedAccumulatedDust);
-      setFilterHealthPct(Number(updatedFilterHealth.toFixed(1)));
-      setCurrentDpPa(Number(updatedDp.toFixed(0)));
-      setFanPowerKw(Number(updatedPowerKw.toFixed(2)));
-      setCumulativeEnergyKwh(updatedEnergy);
-      setCumulativeCostUsd(updatedCost);
+      setLocalFilterHealthPct(Number(updatedFilterHealth.toFixed(1)));
+      setLocalCurrentDpPa(Number(updatedDp.toFixed(0)));
+      setLocalFanPowerKw(Number(updatedPowerKw.toFixed(2)));
+      setLocalCumulativeEnergyKwh(updatedEnergy);
+      setLocalCumulativeCostUsd(updatedCost);
 
-      // History sparklines
-      setPm25History((prev) => [...prev.slice(1), Number(updatedIndoorPM.toFixed(1))]);
-      setCo2History((prev) => [...prev.slice(1), Math.round(updatedIndoorCO2)]);
-      setPowerHistory((prev) => [...prev.slice(1), Number(updatedPowerKw.toFixed(2))]);
-      setFilterHistory((prev) => [...prev.slice(1), Number(updatedFilterHealth.toFixed(1))]);
+      setLocalPm25History((prev) => [...prev.slice(1), Number(updatedIndoorPM.toFixed(1))]);
+      setLocalCo2History((prev) => [...prev.slice(1), Math.round(updatedIndoorCO2)]);
+      setLocalPowerHistory((prev) => [...prev.slice(1), Number(updatedPowerKw.toFixed(2))]);
+      setLocalFilterHistory((prev) => [...prev.slice(1), Number(updatedFilterHealth.toFixed(1))]);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [mode, setPm25, setCo2]);
 
-  // Status Badges computation
+  // Determine active display values based on mode
+  const activeDamperPct = mode === 'aws_live' ? propsDamperPct : localDamperPct;
+  const activeFanSpeedPct = mode === 'aws_live' ? propsFanSpeedPct : localFanSpeedPct;
+  const activeFanPowerKw = mode === 'aws_live' ? propsFanPowerKw : localFanPowerKw;
+  const activeFilterHealthPct = mode === 'aws_live' ? propsFilterHealthPct : localFilterHealthPct;
+  const activeCurrentDpPa = mode === 'aws_live' ? propsCurrentDpPa : localCurrentDpPa;
+  const activeCumulativeEnergyKwh = mode === 'aws_live' ? propsCumulativeEnergyKwh : localCumulativeEnergyKwh;
+  const activeCumulativeCostUsd = mode === 'aws_live' ? propsCumulativeCostUsd : localCumulativeCostUsd;
+  const activeRationale = mode === 'aws_live' ? propsRationale : localRationale;
+
+  const pm25Hist = mode === 'aws_live' ? (sparklines.pm25History || localPm25History) : localPm25History;
+  const co2Hist = mode === 'aws_live' ? (sparklines.co2History || localCo2History) : localCo2History;
+  const powerHist = mode === 'aws_live' ? (sparklines.powerHistory || localPowerHistory) : localPowerHistory;
+  const filterHist = mode === 'aws_live' ? (sparklines.filterHistory || localFilterHistory) : localFilterHistory;
+
+  // Status Badges
   const getPmBadge = (val) => {
     if (val <= 12)
       return {
@@ -392,11 +382,35 @@ export default function AeroDashboard({
         humidity={humidity}
         pm25={pm25}
         onOpenHepa={onOpenHepa}
+        mode={mode}
+        selectedZone={selectedZone}
+        isApiLoading={isApiLoading}
+        isStale={isStale}
+        lastUpdated={lastUpdated}
+        liveAlerts={liveAlerts}
       />
+
+      {/* Mode Operational Notice Bar */}
+      {mode === 'aws_live' && (
+        <div className="glass-panel p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 text-emerald-900 dark:text-emerald-200 text-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <Server className="w-4 h-4 text-emerald-500 shrink-0" />
+            <div>
+              <span className="font-extrabold uppercase tracking-wide">AWS Live Telemetry Engine: </span>
+              <span className="font-mono">Zone: {selectedZone}</span> • Live stream from DynamoDB BuildingTelemetry table.
+            </div>
+          </div>
+          {recommendationOnly && (
+            <div className="px-2.5 py-1 rounded-md bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/40 text-[10px] font-mono font-extrabold tracking-wider uppercase shrink-0">
+              RECOMMENDATION ONLY (No Physical Actuation)
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 2. Main Dashboard Layout (Grid with Left Control Sidebar & Right Digital Twin/Telemetry) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: All Interactive Controls (4 cols on lg) */}
+        {/* Left Column: Interactive Controls */}
         <div className="lg:col-span-4">
           <HvacControlSidebar
             roomPreset={roomPreset}
@@ -423,16 +437,17 @@ export default function AeroDashboard({
             setIsPeakTariff={setIsPeakTariff}
             filterState={filterState}
             setFilterState={setFilterState}
+            mode={mode}
           />
         </div>
 
-        {/* Right Column: 3D Digital Twin, 4 Metrics, Telemetry & Benchmark (8 cols on lg) */}
+        {/* Right Column: 3D Digital Twin, 4 Metrics, Telemetry & Benchmark */}
         <div className="lg:col-span-8 space-y-6">
           {/* 3D WebGL Industrial HVAC & Dynamic Room Digital Twin */}
           <HvacDigitalTwin3D
-            damperPct={damperPct}
-            fanSpeedPct={fanSpeedPct}
-            filterHealthPct={filterHealthPct}
+            damperPct={activeDamperPct}
+            fanSpeedPct={activeFanSpeedPct}
+            filterHealthPct={activeFilterHealthPct}
             roomVolM3={roomVolM3}
             ceilingHeightM={ceilingHeightM}
             occupancy={occupancy}
@@ -456,9 +471,10 @@ export default function AeroDashboard({
               badgeColor={pmBadgeInfo.color}
               min={0}
               max={100}
-              history={pm25History}
+              history={pm25Hist}
               accentColor="#ef4444"
               description="WHO Safety Ceiling: < 15.0 µg/m³"
+              isLive={mode === 'aws_live'}
             />
 
             {/* Metric 2: Indoor CO2 */}
@@ -472,15 +488,16 @@ export default function AeroDashboard({
               badgeColor={co2BadgeInfo.color}
               min={400}
               max={1500}
-              history={co2History}
+              history={co2Hist}
               accentColor="#10b981"
               description={`Health Target: < ${targetCO2Max} ppm`}
+              isLive={mode === 'aws_live'}
             />
 
             {/* Metric 3: HVAC Fan Power */}
             <MetricCard
               title="HVAC Fan Power Draw"
-              value={fanPowerKw}
+              value={activeFanPowerKw}
               unit="kW"
               latexUnit="kW"
               icon={Zap}
@@ -492,44 +509,50 @@ export default function AeroDashboard({
               }
               min={0.1}
               max={3.0}
-              history={powerHistory}
+              history={powerHist}
               accentColor="#6366f1"
               description="Fan Affinity Law: P ∝ RPM³"
+              isEstimated={mode === 'aws_live'}
             />
 
             {/* Metric 4: HEPA Filter Health */}
             <MetricCard
               title="HEPA Filter Health & ΔP"
-              value={filterHealthPct}
+              value={activeFilterHealthPct}
               unit="%"
               latexUnit="%"
               icon={ShieldCheck}
-              badge={`ΔP: ${currentDpPa} Pa`}
+              badge={`ΔP: ${activeCurrentDpPa} Pa`}
               badgeColor={
-                filterHealthPct < 30
+                activeFilterHealthPct < 30
                   ? 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-800'
                   : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-800'
               }
               min={0}
               max={100}
-              history={filterHistory}
+              history={filterHist}
               accentColor="#059669"
-              description={`Dust Cake: ${accumulatedDustG.toFixed(1)} g`}
+              description={`Dust Cake: ${accumulatedDustG.toFixed(1)} g (Estimated)`}
+              isEstimated={mode === 'aws_live'}
             />
           </div>
 
           {/* Machine Telemetry & Closed-Loop Actuation Audit */}
           <TelemetryAuditCard
-            damperPct={damperPct}
-            fanSpeedPct={fanSpeedPct}
-            cumulativeCostUsd={cumulativeCostUsd}
-            cumulativeEnergyKwh={cumulativeEnergyKwh}
-            rationale={rationale}
+            damperPct={activeDamperPct}
+            recommendedDamperPct={recommendedDamperPct}
+            fanSpeedPct={activeFanSpeedPct}
+            cumulativeCostUsd={activeCumulativeCostUsd}
+            cumulativeEnergyKwh={activeCumulativeEnergyKwh}
+            rationale={activeRationale}
             controlMode={controlMode}
+            mode={mode}
+            recommendationOnly={recommendationOnly}
+            selectedZone={selectedZone}
           />
 
           {/* Parallel Benchmark Comparison Card */}
-          <BenchmarkComparison aiPowerKw={fanPowerKw} />
+          <BenchmarkComparison aiPowerKw={activeFanPowerKw} />
         </div>
       </div>
 

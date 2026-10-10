@@ -47,6 +47,9 @@ export default function HvacControlSidebar({
   // Filter
   filterState,
   setFilterState,
+
+  // Mode
+  mode = 'simulation',
 }) {
   const roomPresets = [
     {
@@ -182,6 +185,18 @@ export default function HvacControlSidebar({
 
   return (
     <aside className="space-y-4">
+      {mode === 'aws_live' && (
+        <div className="p-3 rounded-2xl bg-slate-900 text-white border border-emerald-500/40 shadow-sm text-xs space-y-1">
+          <div className="flex items-center gap-2 font-bold text-emerald-400">
+            <Sparkles className="w-4 h-4" />
+            <span>AWS Live Telemetry Active</span>
+          </div>
+          <p className="text-[11px] text-slate-300">
+            Live telemetry & optimizer recommendations are being streamed from AWS API Gateway & DynamoDB.
+          </p>
+        </div>
+      )}
+
       {/* 1. ROOM SPACE & GEOMETRY DETAILS */}
       <div className="glass-panel rounded-2xl p-4 border border-white/80 dark:border-slate-800 shadow-sm">
         <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200/70 dark:border-slate-800/80">

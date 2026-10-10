@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Server } from 'lucide-react';
 
 export default function MetricCard({
   title,
@@ -14,22 +14,26 @@ export default function MetricCard({
   history = [20, 24, 22, 28, 30, 26, 29],
   description,
   accentColor = '#10b981',
+  isLive = false,
+  isEstimated = false,
 }) {
-  const percentage = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+  const percentage = Math.min(100, Math.max(0, ((value - min) / (max - min || 1)) * 100));
 
   // Calculate mini sparkline SVG path
   const width = 110;
   const height = 28;
-  const points = history
+  const safeHistory = Array.isArray(history) && history.length > 0 ? history : [value];
+
+  const points = safeHistory
     .map((val, idx) => {
-      const x = (idx / (history.length - 1)) * width;
+      const x = (idx / (safeHistory.length - 1 || 1)) * width;
       const norm = (val - min) / (max - min || 1);
       const y = height - Math.max(4, Math.min(height - 4, norm * height));
       return `${x},${y}`;
     })
     .join(' ');
 
-  const isTrendingUp = history[history.length - 1] >= history[0];
+  const isTrendingUp = safeHistory.length > 1 ? safeHistory[safeHistory.length - 1] >= safeHistory[0] : true;
 
   return (
     <div className="glass-card rounded-2xl p-5 border border-white/70 dark:border-slate-800 shadow-sm hover:shadow-md transition-all duration-300 relative group flex flex-col justify-between">
@@ -43,9 +47,16 @@ export default function MetricCard({
             <Icon className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              {title}
-            </h3>
+            <div className="flex items-center gap-1.5">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                {title}
+              </h3>
+              {isEstimated && (
+                <span className="text-[9px] font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.2 rounded border border-amber-300 dark:border-amber-800">
+                  Estimated
+                </span>
+              )}
+            </div>
             <div className="flex items-baseline gap-1 mt-0.5">
               <span className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white font-mono">
                 {typeof value === 'number' ? value.toLocaleString() : value}
@@ -86,11 +97,11 @@ export default function MetricCard({
         <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
           {isTrendingUp ? (
             <span className="flex items-center text-rose-500 font-medium">
-              <ArrowUpRight className="w-3 h-3" /> +Live
+              <ArrowUpRight className="w-3 h-3" /> {isLive ? 'AWS' : '+Live'}
             </span>
           ) : (
             <span className="flex items-center text-emerald-500 font-medium">
-              <ArrowDownRight className="w-3 h-3" /> -Live
+              <ArrowDownRight className="w-3 h-3" /> {isLive ? 'AWS' : '-Live'}
             </span>
           )}
           <span className="truncate max-w-[120px]">{description}</span>

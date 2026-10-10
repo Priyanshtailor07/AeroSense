@@ -1,14 +1,27 @@
 import React from 'react';
-import { Droplets, ShieldCheck, Wind, Sparkles, ArrowRight, ShieldAlert, Zap } from 'lucide-react';
+import { Droplets, ShieldCheck, Wind, Sparkles, ArrowRight, ShieldAlert, Zap, Server, AlertTriangle } from 'lucide-react';
 import { THEME_MODES } from '../../utils/themeEngine';
 
-export default function AmbientAlertBar({ theme, aqi, humidity, pm25, onOpenHepa }) {
-  const isAlert = theme.mode === THEME_MODES.ALERT;
+export default function AmbientAlertBar({
+  theme,
+  aqi,
+  humidity,
+  pm25,
+  onOpenHepa,
+  mode = 'simulation',
+  selectedZone = 'Zone-1',
+  isApiLoading = false,
+  isStale = false,
+  lastUpdated = null,
+  liveAlerts = [],
+}) {
+  const isAlert = theme.mode === THEME_MODES.ALERT || (liveAlerts && liveAlerts.length > 0);
 
   const getIcon = () => {
+    if (isAlert) {
+      return <ShieldAlert className="w-6 h-6 text-white animate-bounce" />;
+    }
     switch (theme.mode) {
-      case THEME_MODES.ALERT:
-        return <ShieldAlert className="w-6 h-6 text-white animate-bounce" />;
       case THEME_MODES.RAIN:
         return <Droplets className="w-5 h-5 text-sky-600 animate-pulse" />;
       case THEME_MODES.CLEAN:
@@ -17,6 +30,8 @@ export default function AmbientAlertBar({ theme, aqi, humidity, pm25, onOpenHepa
         return <Wind className="w-5 h-5 text-amber-600" />;
     }
   };
+
+  const activeAlertMsg = liveAlerts && liveAlerts.length > 0 ? liveAlerts[0].message : null;
 
   return (
     <div
@@ -55,15 +70,21 @@ export default function AmbientAlertBar({ theme, aqi, humidity, pm25, onOpenHepa
                   isAlert ? 'text-white' : 'text-slate-900 dark:text-white'
                 }`}
               >
-                {theme.label}
+                {activeAlertMsg ? 'AWS Telemetry Alert' : theme.label}
               </span>
               <span
                 className={`text-xs px-2.5 py-0.5 rounded-full font-black uppercase tracking-wider border shadow-xs ${
                   isAlert ? 'bg-white text-rose-800 border-white' : theme.badgeBg
                 }`}
               >
-                {theme.badge}
+                {activeAlertMsg ? 'BACKEND ANOMALY' : theme.badge}
               </span>
+              {mode === 'aws_live' && (
+                <span className="text-[10px] font-mono font-extrabold px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700 flex items-center gap-1">
+                  <Server className="w-3 h-3 text-emerald-400" />
+                  <span>AWS Live ({selectedZone})</span>
+                </span>
+              )}
               {isAlert && (
                 <span className="flex h-3 w-3 relative">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-80"></span>
@@ -76,7 +97,7 @@ export default function AmbientAlertBar({ theme, aqi, humidity, pm25, onOpenHepa
                 isAlert ? 'text-rose-100' : 'text-slate-600 dark:text-slate-300'
               }`}
             >
-              {theme.sublabel}
+              {activeAlertMsg || theme.sublabel}
             </p>
           </div>
         </div>
@@ -91,33 +112,21 @@ export default function AmbientAlertBar({ theme, aqi, humidity, pm25, onOpenHepa
           >
             <span>
               AQI:{' '}
-              <strong
-                className={
-                  isAlert ? 'text-rose-300 font-mono text-sm' : 'text-slate-900 dark:text-white'
-                }
-              >
+              <strong className={isAlert ? 'text-rose-300 font-mono text-sm' : 'text-slate-900 dark:text-white'}>
                 {aqi}
               </strong>
             </span>
             <span className="opacity-40">•</span>
             <span>
               RH:{' '}
-              <strong
-                className={
-                  isAlert ? 'text-sky-300 font-mono' : 'text-slate-900 dark:text-white'
-                }
-              >
+              <strong className={isAlert ? 'text-sky-300 font-mono' : 'text-slate-900 dark:text-white'}>
                 {humidity}%
               </strong>
             </span>
             <span className="opacity-40">•</span>
             <span>
               PM2.5:{' '}
-              <strong
-                className={
-                  isAlert ? 'text-amber-300 font-mono' : 'text-slate-900 dark:text-white'
-                }
-              >
+              <strong className={isAlert ? 'text-amber-300 font-mono' : 'text-slate-900 dark:text-white'}>
                 {pm25} µg/m³
               </strong>
             </span>
