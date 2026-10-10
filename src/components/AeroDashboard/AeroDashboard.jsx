@@ -20,17 +20,22 @@ export default function AeroDashboard({
   setPm25,
   temp,
   setTemp,
-  damperPct: propsDamperPct = 20.0,
+  // AWS Live props default to null, not to plausible numbers: the
+  // BuildingTelemetry API does not publish fan speed, filter health, pressure
+  // drop or cumulative energy/cost, and those must read as "n/a".
+  damperPct: propsDamperPct = null,
   setDamperPct: setPropsDamperPct,
-  recommendedDamperPct = 20.0,
-  fanSpeedPct: propsFanSpeedPct = 28.0,
+  recommendedDamperPct = null,
+  fanSpeedPct: propsFanSpeedPct = null,
   setFanSpeedPct: setPropsFanSpeedPct,
-  fanPowerKw: propsFanPowerKw = 0.85,
-  filterHealthPct: propsFilterHealthPct = 97.2,
-  currentDpPa: propsCurrentDpPa = 130,
-  cumulativeEnergyKwh: propsCumulativeEnergyKwh = 0.08,
-  cumulativeCostUsd: propsCumulativeCostUsd = 0.04,
+  fanPowerKw: propsFanPowerKw = null,
+  filterHealthPct: propsFilterHealthPct = null,
+  currentDpPa: propsCurrentDpPa = null,
+  cumulativeEnergyKwh: propsCumulativeEnergyKwh = null,
+  cumulativeCostUsd: propsCumulativeCostUsd = null,
   rationale: propsRationale = '',
+  outdoorPm25: awsOutdoorPm25 = null,
+  unavailableMetrics = [],
   recommendationOnly = true,
   sparklines = {},
   liveAlerts = [],
@@ -328,7 +333,23 @@ export default function AeroDashboard({
   const activeCurrentDpPa = mode === 'aws_live' ? propsCurrentDpPa : localCurrentDpPa;
   const activeCumulativeEnergyKwh = mode === 'aws_live' ? propsCumulativeEnergyKwh : localCumulativeEnergyKwh;
   const activeCumulativeCostUsd = mode === 'aws_live' ? propsCumulativeCostUsd : localCumulativeCostUsd;
-  const activeRationale = mode === 'aws_live' ? propsRationale : localRationale;
+  const activeRationale =
+    mode === 'aws_live'
+      ? propsRationale || 'The optimizer returned no rationale for this record.'
+      : localRationale;
+
+  /**
+   * Real outdoor PM2.5 from the API when running live; the simulation's own
+   * ambient figure otherwise.
+   */
+  const activeAmbientPM25 =
+    mode === 'aws_live' && awsOutdoorPm25 !== null ? awsOutdoorPm25 : ambientPM25;
+
+  /** Format a possibly-absent reading for display. */
+  const fmt = (value, digits = 1, suffix = '') =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? `${value.toFixed(digits)}${suffix}`
+      : 'n/a';
 
   const pm25Hist = mode === 'aws_live' ? (sparklines.pm25History || localPm25History) : localPm25History;
   const co2Hist = mode === 'aws_live' ? (sparklines.co2History || localCo2History) : localCo2History;
@@ -445,13 +466,13 @@ export default function AeroDashboard({
         <div className="lg:col-span-8 space-y-6">
           {/* 3D WebGL Industrial HVAC & Dynamic Room Digital Twin */}
           <HvacDigitalTwin3D
-            damperPct={activeDamperPct}
-            fanSpeedPct={activeFanSpeedPct}
-            filterHealthPct={activeFilterHealthPct}
+            damperPct={activeDamperPct ?? 0}
+            fanSpeedPct={activeFanSpeedPct ?? 0}
+            filterHealthPct={activeFilterHealthPct ?? 100}
             roomVolM3={roomVolM3}
             ceilingHeightM={ceilingHeightM}
             occupancy={occupancy}
-            ambientPM25={ambientPM25}
+            ambientPM25={activeAmbientPM25}
             indoorPM25={pm25}
             indoorCO2={co2}
             targetCO2Max={targetCO2Max}
@@ -522,7 +543,7 @@ export default function AeroDashboard({
               unit="%"
               latexUnit="%"
               icon={ShieldCheck}
-              badge={`ΔP: ${activeCurrentDpPa} Pa`}
+              badge={`ΔP: ${fmt(activeCurrentDpPa, 0, ' Pa')}`}
               badgeColor={
                 activeFilterHealthPct < 30
                   ? 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-800'
@@ -532,7 +553,11 @@ export default function AeroDashboard({
               max={100}
               history={filterHist}
               accentColor="#059669"
-              description={`Dust Cake: ${accumulatedDustG.toFixed(1)} g (Estimated)`}
+              description={
+                mode === 'aws_live' && activeFilterHealthPct === null
+                  ? 'Not published by the API'
+                  : `Dust Cake: ${accumulatedDustG.toFixed(1)} g (Estimated)`
+              }
               isEstimated={mode === 'aws_live'}
             />
           </div>

@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadCognitoClientSecret",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:ap-south-1:*:secret:aerosense/cognito-client-secret-*"
+    },
+    {
+      "Sid": "UnauthenticatedCognitoClientOperations",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:InitiateAuth",
+        "cognito-idp:RespondToAuthChallenge",
+        "cognito-idp:RevokeToken",
+        "cognito-idp:GlobalSignOut",
+        "cognito-idp:ForgotPassword",
+        "cognito-idp:ConfirmForgotPassword",
+        "cognito-idp:ConfirmSignUp",
+        "cognito-idp:ResendConfirmationCode",
+        "cognito-idp:SignUp"
+      ],
+      "Resource": "arn:aws:cognito-idp:ap-south-1:*:userpool/ap-south-1_FKhf1Lwlb"
+    }
+  ]
+}

@@ -1,246 +1,380 @@
 /**
- * AeroSense API Service
- * Handles HTTP requests to the AeroSense AWS API Gateway backend
- * Endpoint routes:
- *  - GET /health
- *  - GET /zones
- *  - GET /telemetry/latest?zone_id=...
- *  - GET /telemetry/history?zone_id=...&limit=50
- *  - GET /alerts?zone_id=...&limit=20
+ * AeroSense API client
+ * -----------------------------------------------------------------------------
+ * Every request to the AeroSense backend goes through this module.
+ *
+ * Routes (all absolute against VITE_AEROSENSE_API_URL):
+ *   GET /health                                          public
+ *   GET /zones                                           protected
+ *   GET /telemetry/latest?zone_id=...                    protected
+ *   GET /telemetry/history?zone_id=...&limit=...         protected
+ *   GET /alerts?zone_id=...&limit=...                    protected
+ *
+ * Behaviour that matters:
+ *   * a missing base URL is a hard configuration error, never a relative path.
+ *     Relative paths were previously resolved against the Amplify origin, which
+ *     the SPA rewrite answered with index.html — the source of the spurious
+ *     redirects and 404s.
+ *   * 401 triggers exactly one recovery attempt (refresh the session, and retry
+ *     with the other Cognito token kind in case the API Gateway authorizer is
+ *     configured for id tokens). A second 401 clears the session.
+ *   * 403 is an authorization failure, not an authentication failure, and never
+ *     logs the user out.
+ *   * nothing here ever invents a reading. A failed call throws.
  */
 
-import { getAccessToken } from './auth';
+import { getBearerToken, refreshSession, clearLocalSession, markSessionVerified, getAuthConfig } from './auth';
+import { parseTelemetryTimestamp } from '../utils/telemetryMapper';
 
-/**
- * Get configured API URL from env or fallback
- */
-export function getApiBaseUrl(overrideUrl = null) {
-  if (overrideUrl && typeof overrideUrl === 'string' && overrideUrl.trim() !== '') {
-    return overrideUrl.trim().replace(/\/+$/, '');
+/* ---------------------------------------------------------------- errors --- */
+
+export class ApiError extends Error {
+  constructor(message, { kind = 'SERVER', status = 0, url = '' } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    /** One of CONFIG | NETWORK | TIMEOUT | AUTH | FORBIDDEN | NOT_FOUND | SERVER | PARSE */
+    this.kind = kind;
+    this.status = status;
+    this.url = url;
   }
-  const envUrl = import.meta.env.VITE_AEROSENSE_API_URL;
-  if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '') {
-    return envUrl.trim().replace(/\/+$/, '');
+
+  /** True when the user must re-authenticate. */
+  get isAuthFailure() {
+    return this.kind === 'AUTH';
   }
-  return '';
+}
+
+/* ---------------------------------------------------------------- config --- */
+
+export function getApiBaseUrl() {
+  return getAuthConfig().apiBaseUrl;
+}
+
+function requireBaseUrl() {
+  const baseUrl = getApiBaseUrl();
+  if (!baseUrl) {
+    throw new ApiError(
+      'The AeroSense API URL is not configured (VITE_AEROSENSE_API_URL).',
+      { kind: 'CONFIG' }
+    );
+  }
+  return baseUrl;
 }
 
 /**
- * Build request headers including optional Cognito Bearer Access Token
+ * Build an absolute URL with query parameters, dropping empty values so no
+ * request ever carries `zone_id=undefined`.
  */
-async function buildHeaders(customToken = null) {
-  const headers = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-  };
-
-  const token = customToken || await getAccessToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  return headers;
+function buildUrl(path, params = {}) {
+  const baseUrl = requireBaseUrl();
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const url = new URL(`${baseUrl}${normalizedPath}`);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== null && value !== undefined && value !== '') {
+      url.searchParams.set(key, String(value));
+    }
+  });
+  return url.toString();
 }
 
+/* -------------------------------------------------------------- transport -- */
+
+const DEFAULT_TIMEOUT_MS = 15_000;
+
 /**
- * Internal validated fetch helper
+ * Which Cognito token kind the API Gateway authorizer actually accepts. Starts
+ * at the configured preference and is corrected once by observation, so a
+ * misconfigured VITE_COGNITO_TOKEN_TYPE costs one retry rather than a lockout.
  */
-async function fetchWithValidation(url, options = {}) {
-  let response;
+let acceptedTokenKind = null;
+
+/** Test seam. */
+export function __resetApiForTests() {
+  acceptedTokenKind = null;
+}
+
+function otherKind(kind) {
+  return kind === 'id' ? 'access' : 'id';
+}
+
+async function rawRequest(url, { token, signal, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(signal?.reason);
+  if (signal) {
+    if (signal.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+    signal.addEventListener('abort', onAbort, { once: true });
+  }
+  const timer = setTimeout(() => controller.abort(new ApiError('timeout', { kind: 'TIMEOUT' })), timeoutMs);
+
   try {
-    response = await fetch(url, options);
+    const headers = { Accept: 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return await fetch(url, { method: 'GET', headers, signal: controller.signal });
   } catch (err) {
-    throw new Error(`Network Error connecting to AeroSense backend (${err.message || 'Connection Refused'})`);
+    // A caller-initiated abort must propagate so stale responses are discarded.
+    if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+    if (controller.signal.aborted) {
+      throw new ApiError(`The request to ${url} timed out.`, { kind: 'TIMEOUT', url });
+    }
+    // fetch() rejects identically for DNS failures, offline, and CORS denials;
+    // the browser console holds the distinguishing detail.
+    throw new ApiError(
+      'Could not reach the AeroSense API. This is a network, CORS or DNS failure — no data was received.',
+      { kind: 'NETWORK', url }
+    );
+  } finally {
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener('abort', onAbort);
+  }
+}
+
+async function readError(response) {
+  try {
+    const data = await response.json();
+    return data?.message || data?.error || JSON.stringify(data);
+  } catch {
+    return await response.text().catch(() => '');
+  }
+}
+
+async function parseJson(response, url) {
+  try {
+    return await response.json();
+  } catch {
+    throw new ApiError(
+      `The response from ${url} was not valid JSON.`,
+      { kind: 'PARSE', status: response.status, url }
+    );
+  }
+}
+
+/**
+ * Perform a protected GET. Attaches a verified bearer token, recovers once from
+ * a 401, and marks the session server-verified on success.
+ */
+async function protectedGet(path, params = {}, { signal } = {}) {
+  const url = buildUrl(path, params);
+  const preferredKind = acceptedTokenKind || getAuthConfig().tokenType;
+
+  let token = await getBearerToken(preferredKind);
+  if (!token) {
+    throw new ApiError('You are not signed in.', { kind: 'AUTH', status: 401, url });
+  }
+
+  let response = await rawRequest(url, { token, signal });
+
+  if (response.status === 401) {
+    // Attempt 2: the token may simply be stale, or the authorizer may want the
+    // other token kind. Try both once, then give up and force re-authentication.
+    const refreshed = await refreshSession();
+    const retryKinds = refreshed ? [preferredKind, otherKind(preferredKind)] : [otherKind(preferredKind)];
+    let recovered = false;
+
+    for (const kind of retryKinds) {
+      const retryToken = await getBearerToken(kind);
+      if (!retryToken || retryToken === token) continue;
+      response = await rawRequest(url, { token: retryToken, signal });
+      if (response.status !== 401) {
+        acceptedTokenKind = kind;
+        recovered = true;
+        break;
+      }
+      token = retryToken;
+    }
+
+    if (!recovered && response.status === 401) {
+      clearLocalSession();
+      throw new ApiError(
+        'Your session is no longer valid. Please sign in again.',
+        { kind: 'AUTH', status: 401, url }
+      );
+    }
+  }
+
+  if (response.status === 403) {
+    // Distinct from authentication: the token is good, the grant is not.
+    throw new ApiError(
+      `Access denied for ${path}. Your account is authenticated but not permitted to read this resource.`,
+      { kind: 'FORBIDDEN', status: 403, url }
+    );
+  }
+
+  if (response.status === 404) {
+    // The telemetry Lambda also returns 404 for "no data for this zone", which
+    // is an empty result rather than a missing route.
+    const detail = await readError(response);
+    const isEmptyZone = /no telemetry found/i.test(detail || '');
+    throw new ApiError(
+      isEmptyZone
+        ? `The API has no telemetry recorded for this zone yet.`
+        : `The endpoint ${path} is not deployed on the configured API.`,
+      { kind: isEmptyZone ? 'EMPTY' : 'NOT_FOUND', status: 404, url }
+    );
   }
 
   if (!response.ok) {
-    let errorText = '';
-    try {
-      const errJson = await response.json();
-      errorText = errJson.message || errJson.error || JSON.stringify(errJson);
-    } catch {
-      errorText = await response.text().catch(() => '');
-    }
-
-    if (response.status === 401) {
-      throw new Error(`Authentication Required (401): ${errorText || 'Invalid or expired Cognito token'}`);
-    }
-    if (response.status === 403) {
-      throw new Error(`Access Forbidden (403): ${errorText || 'Insufficient permissions'}`);
-    }
-    if (response.status === 404) {
-      throw new Error(`Resource Not Found (404): ${errorText || url}`);
-    }
-    throw new Error(`API Error [${response.status}]: ${errorText || response.statusText || 'Server error'}`);
+    const detail = await readError(response);
+    throw new ApiError(
+      `The AeroSense API returned ${response.status}${detail ? `: ${detail}` : ''}.`,
+      { kind: 'SERVER', status: response.status, url }
+    );
   }
 
-  try {
-    const data = await response.json();
-    return data;
-  } catch (err) {
-    throw new Error(`Invalid JSON payload received from endpoint: ${err.message}`);
+  const data = await parseJson(response, url);
+  // The authorizer accepted this token, which is what makes the session's
+  // "verified" state meaningful rather than a local boolean.
+  markSessionVerified();
+  return data;
+}
+
+/* ------------------------------------------------------------ normalizers -- */
+
+function normalizeZone(zone, index) {
+  if (typeof zone === 'string') {
+    return { zone_id: zone, name: zone, raw: zone };
   }
+  const id = zone.zone_id ?? zone.id ?? zone.zoneId ?? `zone-${String(index + 1).padStart(2, '0')}`;
+  return {
+    zone_id: String(id),
+    name: String(zone.name ?? zone.zone_name ?? zone.zoneName ?? id),
+    raw: zone,
+  };
 }
 
 /**
- * Response Validation Helpers
+ * Accept the shapes the Lambda may use for a collection — a bare array or a
+ * wrapper keyed by name/`items`/`data` — without inventing entries. An
+ * unrecognised shape yields an empty list, which the UI surfaces as empty.
  */
-function validateHealthResponse(data) {
+function toList(data, ...keys) {
+  if (Array.isArray(data)) return data;
   if (data && typeof data === 'object') {
-    return {
-      status: data.status || data.health || 'healthy',
-      timestamp: data.timestamp || new Date().toISOString(),
-      raw: data,
-    };
-  }
-  return { status: 'healthy', timestamp: new Date().toISOString() };
-}
-
-function validateZonesResponse(data) {
-  if (Array.isArray(data)) {
-    return data.map((z, idx) => normalizeZone(z, idx));
-  }
-  if (data && Array.isArray(data.zones)) {
-    return data.zones.map((z, idx) => normalizeZone(z, idx));
-  }
-  if (data && Array.isArray(data.items)) {
-    return data.items.map((z, idx) => normalizeZone(z, idx));
-  }
-  // Single object fallback
-  if (data && typeof data === 'object' && (data.zone_id || data.id)) {
-    return [normalizeZone(data, 0)];
+    for (const key of [...keys, 'items', 'data', 'Items']) {
+      if (Array.isArray(data[key])) return data[key];
+    }
   }
   return [];
 }
 
-function normalizeZone(z, index) {
-  if (typeof z === 'string') {
-    return { zone_id: z, name: `Zone ${z}`, description: `Building Zone ${z}` };
+/**
+ * `GET /alerts` does not return alert objects. It returns whole telemetry
+ * records that have a non-empty `alerts` array of strings, e.g.
+ *
+ *   { "zone_id": "zone-01", "timestamp": "1791665513",
+ *     "alerts": ["High indoor CO2: 1555 ppm"], "co2": 1555, ... }
+ *
+ * So each record is flattened into one entry per alert string, carrying the
+ * record's zone and timestamp. Severity is inferred from the text because the
+ * API does not supply one.
+ */
+function inferSeverity(message) {
+  const text = message.toLowerCase();
+  if (text.includes('severe') || text.includes('critical') || text.includes('hazard')) return 'critical';
+  if (text.includes('high') || text.includes('elevated')) return 'warning';
+  return 'info';
+}
+
+function flattenAlertRecords(records) {
+  const out = [];
+
+  records.forEach((record, recordIndex) => {
+    if (!record || typeof record !== 'object') return;
+
+    const zoneId = record.zone_id ?? null;
+    const rawTimestamp = record.timestamp ?? null;
+    const timestampMs = parseTelemetryTimestamp(rawTimestamp);
+    const messages = Array.isArray(record.alerts)
+      ? record.alerts.filter((a) => typeof a === 'string' && a.trim() !== '')
+      : [];
+
+    messages.forEach((message, messageIndex) => {
+      out.push({
+        // Stable within a response: zone + timestamp + position.
+        id: `${zoneId ?? 'zone'}-${rawTimestamp ?? recordIndex}-${messageIndex}`,
+        zone_id: zoneId,
+        message: message.trim(),
+        severity: inferSeverity(message),
+        timestampMs,
+        timestamp: rawTimestamp,
+        // The optimizer's own explanation for the same record, when present.
+        reason: typeof record.optimizer_reason === 'string' ? record.optimizer_reason : null,
+        raw: record,
+      });
+    });
+  });
+
+  // Newest first.
+  return out.sort((a, b) => (b.timestampMs ?? 0) - (a.timestampMs ?? 0));
+}
+
+/* ------------------------------------------------------------ public API --- */
+
+/** Public health probe. Reports exactly what the service returned. */
+export async function checkHealth({ signal } = {}) {
+  const url = buildUrl('/health');
+  const response = await rawRequest(url, { token: null, signal });
+  if (!response.ok) {
+    const detail = await readError(response);
+    throw new ApiError(
+      `Health check failed with ${response.status}${detail ? `: ${detail}` : ''}.`,
+      { kind: 'SERVER', status: response.status, url }
+    );
   }
-  const id = z.zone_id || z.id || z.zoneId || `zone-${index + 1}`;
-  const name = z.name || z.zone_name || z.zoneName || `Zone ${id}`;
+  const data = await parseJson(response, url);
   return {
-    zone_id: String(id),
-    name: String(name),
-    building: z.building || 'Main Facility',
-    floor: z.floor || 1,
-    description: z.description || `Zone ${id} HVAC system`,
-    raw: z,
+    status: data?.status ?? null,
+    service: data?.service ?? null,
+    healthy: data?.status === 'ok' || data?.status === 'healthy',
+    raw: data,
   };
 }
 
-function validateTelemetryRecord(data) {
-  if (!data || typeof data !== 'object') {
-    throw new Error('Telemetry response is empty or invalid object');
+export async function fetchZones({ signal } = {}) {
+  const data = await protectedGet('/zones', {}, { signal });
+  const list = toList(data, 'zones');
+  if (list.length === 0 && data && typeof data === 'object' && (data.zone_id || data.id)) {
+    return [normalizeZone(data, 0)];
   }
-  // Support nested payload wrapper e.g. { data: {...} } or { item: {...} }
-  if (data.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
-    return data.data;
-  }
-  if (data.item && typeof data.item === 'object') {
-    return data.item;
-  }
-  if (Array.isArray(data.items) && data.items.length > 0) {
-    return data.items[0];
-  }
-  if (Array.isArray(data) && data.length > 0) {
-    return data[0];
-  }
-  return data;
+  return list.map(normalizeZone);
 }
 
-function validateHistoryResponse(data) {
-  let list = [];
-  if (Array.isArray(data)) {
-    list = data;
-  } else if (data && Array.isArray(data.history)) {
-    list = data.history;
-  } else if (data && Array.isArray(data.items)) {
-    list = data.items;
-  } else if (data && Array.isArray(data.telemetry)) {
-    list = data.telemetry;
-  } else if (data && Array.isArray(data.data)) {
-    list = data.data;
+export async function fetchLatestTelemetry(zoneId, { signal } = {}) {
+  if (!zoneId) throw new ApiError('A zone_id is required to fetch telemetry.', { kind: 'CONFIG' });
+  const data = await protectedGet('/telemetry/latest', { zone_id: zoneId }, { signal });
+
+  // Unwrap a single-record envelope if the Lambda uses one.
+  let record = data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    if (data.item && typeof data.item === 'object') record = data.item;
+    else if (data.data && typeof data.data === 'object' && !Array.isArray(data.data)) record = data.data;
+    else if (Array.isArray(data.items)) record = data.items[0];
+  } else if (Array.isArray(data)) {
+    record = data[0];
   }
 
-  return list.filter((item) => item && typeof item === 'object');
-}
-
-function validateAlertsResponse(data) {
-  let list = [];
-  if (Array.isArray(data)) {
-    list = data;
-  } else if (data && Array.isArray(data.alerts)) {
-    list = data.alerts;
-  } else if (data && Array.isArray(data.items)) {
-    list = data.items;
-  } else if (data && Array.isArray(data.data)) {
-    list = data.data;
+  if (!record || typeof record !== 'object') {
+    throw new ApiError(
+      `No telemetry is available for ${zoneId}.`,
+      { kind: 'SERVER', status: 200, url: buildUrl('/telemetry/latest', { zone_id: zoneId }) }
+    );
   }
-
-  return list.map((a, idx) => ({
-    id: a.id || a.alert_id || `alert-${idx}`,
-    zone_id: a.zone_id || a.zoneId || 'all',
-    type: a.type || a.severity || 'warning',
-    message: a.message || a.title || 'Telemetry anomaly detected',
-    timestamp: a.timestamp || a.created_at || new Date().toISOString(),
-    raw: a,
-  }));
+  return record;
 }
 
-/**
- * Public API Methods
- */
-
-export async function checkHealth(customApiUrl = null) {
-  const baseUrl = getApiBaseUrl(customApiUrl);
-  if (!baseUrl) throw new Error('API Base URL is not configured (VITE_AEROSENSE_API_URL)');
-  
-  const headers = await buildHeaders();
-  const raw = await fetchWithValidation(`${baseUrl}/health`, { method: 'GET', headers });
-  return validateHealthResponse(raw);
+/** The API rejects a limit outside 1..100 with a 400, so clamp before sending. */
+function clampLimit(limit) {
+  const parsed = Number(limit);
+  if (!Number.isFinite(parsed)) return 20;
+  return Math.min(100, Math.max(1, Math.trunc(parsed)));
 }
 
-export async function fetchZones(customApiUrl = null, customToken = null) {
-  const baseUrl = getApiBaseUrl(customApiUrl);
-  if (!baseUrl) throw new Error('API Base URL is not configured (VITE_AEROSENSE_API_URL)');
-  
-  const headers = await buildHeaders(customToken);
-  const raw = await fetchWithValidation(`${baseUrl}/zones`, { method: 'GET', headers });
-  return validateZonesResponse(raw);
+export async function fetchTelemetryHistory(zoneId, limit = 20, { signal } = {}) {
+  if (!zoneId) throw new ApiError('A zone_id is required to fetch history.', { kind: 'CONFIG' });
+  const data = await protectedGet('/telemetry/history', { zone_id: zoneId, limit: clampLimit(limit) }, { signal });
+  return toList(data, 'history', 'telemetry').filter((r) => r && typeof r === 'object');
 }
 
-export async function fetchLatestTelemetry(zoneId, customApiUrl = null, customToken = null) {
-  const baseUrl = getApiBaseUrl(customApiUrl);
-  if (!baseUrl) throw new Error('API Base URL is not configured (VITE_AEROSENSE_API_URL)');
-  if (!zoneId) throw new Error('zone_id parameter is required');
-
-  const headers = await buildHeaders(customToken);
-  const url = `${baseUrl}/telemetry/latest?zone_id=${encodeURIComponent(zoneId)}`;
-  const raw = await fetchWithValidation(url, { method: 'GET', headers });
-  return validateTelemetryRecord(raw);
-}
-
-export async function fetchTelemetryHistory(zoneId, limit = 50, customApiUrl = null, customToken = null) {
-  const baseUrl = getApiBaseUrl(customApiUrl);
-  if (!baseUrl) throw new Error('API Base URL is not configured (VITE_AEROSENSE_API_URL)');
-  if (!zoneId) throw new Error('zone_id parameter is required');
-
-  const headers = await buildHeaders(customToken);
-  const url = `${baseUrl}/telemetry/history?zone_id=${encodeURIComponent(zoneId)}&limit=${limit}`;
-  const raw = await fetchWithValidation(url, { method: 'GET', headers });
-  return validateHistoryResponse(raw);
-}
-
-export async function fetchAlerts(zoneId = null, limit = 20, customApiUrl = null, customToken = null) {
-  const baseUrl = getApiBaseUrl(customApiUrl);
-  if (!baseUrl) throw new Error('API Base URL is not configured (VITE_AEROSENSE_API_URL)');
-
-  const headers = await buildHeaders(customToken);
-  let url = `${baseUrl}/alerts?limit=${limit}`;
-  if (zoneId) {
-    url += `&zone_id=${encodeURIComponent(zoneId)}`;
-  }
-  const raw = await fetchWithValidation(url, { method: 'GET', headers });
-  return validateAlertsResponse(raw);
+export async function fetchAlerts(zoneId, limit = 20, { signal } = {}) {
+  const data = await protectedGet('/alerts', { zone_id: zoneId, limit: clampLimit(limit) }, { signal });
+  return flattenAlertRecords(toList(data, 'alerts'));
 }

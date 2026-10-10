@@ -17,14 +17,21 @@ export default function MetricCard({
   isLive = false,
   isEstimated = false,
 }) {
-  const percentage = Math.min(100, Math.max(0, ((value - min) / (max - min || 1)) * 100));
+  // A null value means the API did not publish this metric. Render it as "n/a"
+  // rather than coercing it into a number that would read as a real measurement.
+  const hasValue = typeof value === 'number' && Number.isFinite(value);
+  const displayValue = hasValue ? value.toLocaleString() : value == null ? 'n/a' : value;
+  const percentage = hasValue
+    ? Math.min(100, Math.max(0, ((value - min) / (max - min || 1)) * 100))
+    : 0;
 
   // Calculate mini sparkline SVG path
   const width = 110;
   const height = 28;
-  const safeHistory = Array.isArray(history) && history.length > 0 ? history : [value];
+  const safeHistory =
+    Array.isArray(history) && history.length > 0 ? history : hasValue ? [value] : [];
 
-  const points = safeHistory
+  const points = (safeHistory.length > 0 ? safeHistory : [])
     .map((val, idx) => {
       const x = (idx / (safeHistory.length - 1 || 1)) * width;
       const norm = (val - min) / (max - min || 1);
@@ -34,6 +41,7 @@ export default function MetricCard({
     .join(' ');
 
   const isTrendingUp = safeHistory.length > 1 ? safeHistory[safeHistory.length - 1] >= safeHistory[0] : true;
+  const showTrend = safeHistory.length > 0;
 
   return (
     <div className="glass-card rounded-2xl p-5 border border-white/70 dark:border-slate-800 shadow-sm hover:shadow-md transition-all duration-300 relative group flex flex-col justify-between">
@@ -59,7 +67,7 @@ export default function MetricCard({
             </div>
             <div className="flex items-baseline gap-1 mt-0.5">
               <span className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white font-mono">
-                {typeof value === 'number' ? value.toLocaleString() : value}
+                {displayValue}
               </span>
               <span className="text-xs font-medium text-slate-500 dark:text-slate-400 font-sans">
                 {unit}

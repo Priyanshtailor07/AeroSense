@@ -1,259 +1,492 @@
 /**
- * AeroSense AWS Cognito Auth Service
- * Provides lightweight authentication using the AWS Cognito Identity Provider REST API
- * Supports sign-in, token storage, session validation, automatic token refresh, and sign-out.
- * Never embeds AWS secret keys.
+ * AeroSense authentication service
+ * -----------------------------------------------------------------------------
+ * The Cognito app client for this deployment is a *confidential* client: it has
+ * a client secret, so Cognito requires a SECRET_HASH on InitiateAuth and
+ * friends. That secret cannot live in a browser bundle, so this module never
+ * talks to cognito-idp directly. Every credential operation goes to the
+ * AeroSense auth Lambda (POST {API}/auth/*), which holds the secret in Secrets
+ * Manager and computes SECRET_HASH server-side.
+ *
+ * Token handling
+ *   * access + id tokens live in module memory only — they are never written to
+ *     localStorage, so they cannot be read back by a later page load or by any
+ *     script that runs after a logout.
+ *   * the refresh token lives in sessionStorage, which is what lets a page
+ *     refresh restore the session while still clearing when the tab closes.
+ *     Exchanging it requires the Lambda (only it knows the client secret).
+ *   * a session is only ever reported as authenticated after a token has been
+ *     parsed and its issuer, audience and expiry checked. A stored string on
+ *     its own never counts as proof of authentication.
  */
 
-const STORAGE_KEY = 'aerosense_cognito_session';
-const CONFIG_KEY = 'aerosense_cognito_config';
+const REFRESH_STORAGE_KEY = 'aerosense_refresh';
 const listeners = new Set();
 
-/**
- * Retrieve Cognito Pool/Client configuration from env or localStorage overrides
- */
-export function getCognitoConfig(customConfig = null) {
-  let userPoolId = customConfig?.userPoolId || import.meta.env.VITE_COGNITO_USER_POOL_ID || '';
-  let clientId = customConfig?.clientId || import.meta.env.VITE_COGNITO_CLIENT_ID || '';
-  let region = customConfig?.region || import.meta.env.VITE_AWS_REGION || 'ap-south-1';
+/** Skew applied to expiry checks so a token is renewed before it dies. */
+const EXPIRY_SKEW_MS = 120_000;
 
-  // Fallback to saved local runtime config if present
-  if ((!userPoolId || !clientId) && typeof localStorage !== 'undefined') {
-    try {
-      const saved = localStorage.getItem(CONFIG_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (!userPoolId) userPoolId = parsed.userPoolId || '';
-        if (!clientId) clientId = parsed.clientId || '';
-        if (!region) region = parsed.region || 'ap-south-1';
-      }
-    } catch {
-      // ignore JSON parse errors
-    }
-  }
+/* --------------------------------------------------------------- config --- */
+
+export function getAuthConfig() {
+  const region = (import.meta.env.VITE_AWS_REGION || 'ap-south-1').trim();
+  const userPoolId = (import.meta.env.VITE_COGNITO_USER_POOL_ID || '').trim();
+  const clientId = (import.meta.env.VITE_COGNITO_CLIENT_ID || '').trim();
+  const apiBaseUrl = (import.meta.env.VITE_AEROSENSE_API_URL || '').trim().replace(/\/+$/, '');
+  const tokenType = (import.meta.env.VITE_COGNITO_TOKEN_TYPE || 'access').trim().toLowerCase();
 
   return {
-    userPoolId: userPoolId.trim(),
-    clientId: clientId.trim(),
-    region: region.trim() || 'ap-south-1',
+    region,
+    userPoolId,
+    clientId,
+    apiBaseUrl,
+    tokenType: tokenType === 'id' ? 'id' : 'access',
+    issuer: userPoolId ? `https://cognito-idp.${region}.amazonaws.com/${userPoolId}` : '',
   };
 }
 
 /**
- * Save custom runtime Cognito configuration
+ * Report configuration that would make authentication impossible, so the UI can
+ * say so plainly instead of failing with a confusing network error.
  */
-export function saveCognitoConfig(config) {
-  if (typeof localStorage !== 'undefined') {
-    localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+export function getConfigError() {
+  const { apiBaseUrl, userPoolId, clientId } = getAuthConfig();
+  const missing = [];
+  if (!apiBaseUrl) missing.push('VITE_AEROSENSE_API_URL');
+  if (!userPoolId) missing.push('VITE_COGNITO_USER_POOL_ID');
+  if (!clientId) missing.push('VITE_COGNITO_CLIENT_ID');
+  if (missing.length === 0) return null;
+  return `AeroSense is not configured. Missing build-time variables: ${missing.join(', ')}.`;
+}
+
+/* ---------------------------------------------------------------- errors --- */
+
+export class AuthError extends Error {
+  constructor(message, code = 'AUTH_ERROR', status = 0, extra = {}) {
+    super(message);
+    this.name = 'AuthError';
+    this.code = code;
+    this.status = status;
+    Object.assign(this, extra);
   }
 }
 
-/**
- * Get cached session from localStorage
- */
-function getStoredSession() {
-  if (typeof localStorage === 'undefined') return null;
+/* -------------------------------------------------------------- jwt utils -- */
+
+/** Decode a JWT payload without verifying it. Signature checks are the API Gateway authorizer's job. */
+export function decodeJwt(token) {
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const json = atob(padded);
+    // Handle any multi-byte characters in claims such as `name`.
+    const decoded = decodeURIComponent(
+      Array.from(json, (c) => `%${c.charCodeAt(0).toString(16).padStart(2, '0')}`).join('')
+    );
+    const payload = JSON.parse(decoded);
+    return payload && typeof payload === 'object' ? payload : null;
   } catch {
     return null;
   }
 }
 
 /**
- * Save session to localStorage
+ * Validate a token's claims against the configured pool. This is a correctness
+ * guard against pointing the app at the wrong pool or replaying a foreign
+ * token — not a security boundary, since it does not verify the signature.
  */
-function saveSession(session) {
-  if (typeof localStorage === 'undefined') return;
-  if (!session) {
-    localStorage.removeItem(STORAGE_KEY);
-  } else {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+export function inspectToken(token, { expectedUse = null } = {}) {
+  const claims = decodeJwt(token);
+  if (!claims) return { valid: false, reason: 'MALFORMED', claims: null, expiresAt: 0 };
+
+  const { issuer, clientId } = getAuthConfig();
+  const expiresAt = typeof claims.exp === 'number' ? claims.exp * 1000 : 0;
+
+  if (issuer && claims.iss && claims.iss !== issuer) {
+    return { valid: false, reason: 'ISSUER_MISMATCH', claims, expiresAt };
   }
-  notifyListeners(session);
+
+  // Access tokens carry `client_id`; id tokens carry `aud`. Either must match
+  // the app client this build is configured for.
+  const audience = claims.aud || claims.client_id;
+  const audiences = Array.isArray(audience) ? audience : [audience].filter(Boolean);
+  if (clientId && audiences.length > 0 && !audiences.includes(clientId)) {
+    return { valid: false, reason: 'AUDIENCE_MISMATCH', claims, expiresAt };
+  }
+
+  if (expectedUse && claims.token_use && claims.token_use !== expectedUse) {
+    return { valid: false, reason: 'TOKEN_USE_MISMATCH', claims, expiresAt };
+  }
+
+  if (!expiresAt || Date.now() >= expiresAt) {
+    return { valid: false, reason: 'EXPIRED', claims, expiresAt };
+  }
+
+  return { valid: true, reason: null, claims, expiresAt };
 }
 
+/* ----------------------------------------------------------- memory state -- */
+
 /**
- * Notify subscribers of auth state change
+ * In-memory session. Deliberately not persisted: a reload rebuilds it from the
+ * refresh token via the Lambda, which re-proves the session against Cognito.
  */
-function notifyListeners(session) {
+let current = null;
+
+function readStoredRefresh() {
+  if (typeof sessionStorage === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(REFRESH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.refreshToken !== 'string' || typeof parsed.username !== 'string') {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredRefresh(session) {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    if (session?.refreshToken && session?.username) {
+      sessionStorage.setItem(
+        REFRESH_STORAGE_KEY,
+        JSON.stringify({
+          refreshToken: session.refreshToken,
+          username: session.username,
+          displayName: session.displayName || session.username,
+        })
+      );
+    } else {
+      sessionStorage.removeItem(REFRESH_STORAGE_KEY);
+    }
+  } catch {
+    // Storage can be unavailable (private mode, blocked site data). The session
+    // still works for this page view; it just will not survive a reload.
+  }
+}
+
+function clearStoredRefresh() {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.removeItem(REFRESH_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/** Public view of the session. Never exposes the refresh token. */
+function publicSession(session) {
+  if (!session) return null;
+  return {
+    /** The pool's internal username (a UUID for this alias pool). */
+    username: session.username,
+    /** What to show a human: their email. */
+    displayName: session.displayName || session.username,
+    expiresAt: session.expiresAt,
+    tokenType: session.tokenType,
+    claims: session.claims || null,
+    verifiedAt: session.verifiedAt || null,
+  };
+}
+
+function notify() {
+  const snapshot = publicSession(current);
   listeners.forEach((fn) => {
     try {
-      fn(session);
+      fn(snapshot);
     } catch {
-      // ignore error
+      // a broken subscriber must not break the others
     }
   });
 }
 
-/**
- * Subscribe to auth state changes
- */
 export function onAuthStateChanged(listener) {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
-/**
- * Perform Cognito API request to initiate auth
- */
-async function callCognitoAuth(action, target, body, region) {
-  const endpoint = `https://cognito-idp.${region}.amazonaws.com/`;
-  let response;
+/** Does a restorable refresh token exist? Not proof of authentication. */
+export function hasRestorableSession() {
+  return Boolean(readStoredRefresh());
+}
 
+export function getCurrentSession() {
+  return publicSession(current);
+}
+
+/**
+ * Record that a protected API call was accepted by the API Gateway authorizer.
+ * This is what makes the "Authenticated Session Active" indicator meaningful:
+ * it reflects a server-verified session rather than a local flag.
+ */
+export function markSessionVerified() {
+  if (!current) return;
+  current.verifiedAt = Date.now();
+  notify();
+}
+
+/* ------------------------------------------------------------ transport --- */
+
+async function postAuth(action, payload, { signal } = {}) {
+  const configError = getConfigError();
+  if (configError) throw new AuthError(configError, 'CONFIG_ERROR');
+
+  const { apiBaseUrl } = getAuthConfig();
+  let response;
   try {
-    response = await fetch(endpoint, {
+    response = await fetch(`${apiBaseUrl}/auth/${action}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-amz-json-1.1',
-        'X-Amz-Target': `AWSCognitoIdentityProviderService.${target}`,
-      },
-      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal,
     });
   } catch (err) {
-    throw new Error(`Cognito connection failed: ${err.message || 'Network unreachable'}`);
+    if (err?.name === 'AbortError') throw err;
+    throw new AuthError(
+      'Could not reach the AeroSense authentication service. Check your connection and try again.',
+      'NETWORK_ERROR'
+    );
   }
 
-  const data = await response.json().catch(() => ({}));
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
 
-  if (!response.ok) {
-    const msg = data.message || data.__type || `Cognito Error ${response.status}`;
-    throw new Error(msg);
+  if (response.status === 404) {
+    throw new AuthError(
+      `The authentication endpoint /auth/${action} is not deployed on the configured API.`,
+      'ENDPOINT_MISSING',
+      404
+    );
+  }
+
+  if (!response.ok || !data || data.ok !== true) {
+    throw new AuthError(
+      data?.message || `Authentication failed (HTTP ${response.status}).`,
+      data?.code || 'AUTH_ERROR',
+      response.status,
+      { challenge: data?.challenge || null }
+    );
   }
 
   return data;
 }
 
 /**
- * Sign In with Username & Password via Cognito USER_PASSWORD_AUTH
+ * Accept a token set from the Lambda, validate it, and install it as current.
+ * Rejects anything whose claims do not check out, so a malformed or foreign
+ * token can never be mistaken for a working session.
  */
-export async function signIn(username, password, customConfig = null) {
-  const config = getCognitoConfig(customConfig);
-
-  if (!config.clientId) {
-    throw new Error('Cognito Client ID is not configured (VITE_COGNITO_CLIENT_ID)');
+function adoptSession(raw) {
+  if (!raw || typeof raw.accessToken !== 'string') {
+    throw new AuthError('The authentication service returned no usable tokens.', 'NO_TOKENS');
   }
 
-  if (customConfig) {
-    saveCognitoConfig(config);
+  const inspection = inspectToken(raw.accessToken, { expectedUse: 'access' });
+  if (!inspection.valid) {
+    throw new AuthError(
+      `The authentication service returned a token that failed validation (${inspection.reason}).`,
+      'TOKEN_INVALID'
+    );
   }
 
-  const payload = {
-    AuthFlow: 'USER_PASSWORD_AUTH',
-    ClientId: config.clientId,
-    AuthParameters: {
-      USERNAME: username,
-      PASSWORD: password,
-    },
+  const { tokenType } = getAuthConfig();
+  // The internal username is what REFRESH_TOKEN_AUTH's SECRET_HASH is computed
+  // over, so it is the one that must be stored and replayed on refresh — not
+  // the email the user typed.
+  const internalUsername =
+    inspection.claims?.username || inspection.claims?.['cognito:username'] || raw.username || 'operator';
+  current = {
+    username: internalUsername,
+    displayName: raw.displayName || internalUsername,
+    accessToken: raw.accessToken,
+    idToken: typeof raw.idToken === 'string' ? raw.idToken : null,
+    refreshToken: typeof raw.refreshToken === 'string' ? raw.refreshToken : current?.refreshToken || null,
+    tokenType,
+    // Trust the token's own exp over any server-reported expiry.
+    expiresAt: inspection.expiresAt,
+    claims: inspection.claims,
+    verifiedAt: null,
   };
 
-  const result = await callCognitoAuth('InitiateAuth', 'InitiateAuth', payload, config.region);
+  writeStoredRefresh(current);
+  notify();
+  return publicSession(current);
+}
 
-  if (!result || !result.AuthenticationResult) {
-    if (result.ChallengeName) {
-      throw new Error(`Cognito Challenge Required (${result.ChallengeName}). Please complete setup in AWS console.`);
+/* ---------------------------------------------------------------- actions -- */
+
+export async function signIn(username, password, { signal } = {}) {
+  if (!username || !password) {
+    throw new AuthError('Enter both a username and a password.', 'INVALID_INPUT');
+  }
+
+  const data = await postAuth('signin', { username, password }, { signal });
+
+  // Cognito can demand a challenge instead of issuing tokens. Surface it so the
+  // UI can prompt; crucially, do not report success.
+  if (data.challenge) {
+    return { status: 'challenge', challenge: data.challenge };
+  }
+
+  return { status: 'authenticated', session: adoptSession(data.session) };
+}
+
+export async function respondToChallenge(payload, { signal } = {}) {
+  const data = await postAuth('respond-challenge', payload, { signal });
+  if (data.challenge) {
+    return { status: 'challenge', challenge: data.challenge };
+  }
+  return { status: 'authenticated', session: adoptSession(data.session) };
+}
+
+/**
+ * Exchange the stored refresh token for fresh tokens. Concurrent callers share
+ * a single in-flight request so a burst of 401s cannot stampede the Lambda.
+ */
+let refreshInFlight = null;
+
+export function refreshSession() {
+  if (refreshInFlight) return refreshInFlight;
+
+  const stored = current?.refreshToken
+    ? {
+        refreshToken: current.refreshToken,
+        username: current.username,
+        displayName: current.displayName,
+      }
+    : readStoredRefresh();
+
+  if (!stored) {
+    return Promise.resolve(null);
+  }
+
+  refreshInFlight = (async () => {
+    try {
+      const data = await postAuth('refresh', {
+        username: stored.username,
+        refreshToken: stored.refreshToken,
+      });
+      return adoptSession({
+        ...data.session,
+        username: stored.username,
+        displayName: data.session?.displayName || stored.displayName,
+      });
+    } catch (err) {
+      // A refresh token that Cognito rejects is unrecoverable: drop everything
+      // and let the guard send the user back to login.
+      if (err?.name !== 'AbortError') {
+        clearLocalSession();
+      }
+      return null;
+    } finally {
+      refreshInFlight = null;
     }
-    throw new Error('Authentication response did not return valid tokens.');
-  }
+  })();
 
-  const authResult = result.AuthenticationResult;
-  const expiresIn = authResult.ExpiresIn || 3600;
-  const expiresAt = Date.now() + expiresIn * 1000;
-
-  const session = {
-    username,
-    accessToken: authResult.AccessToken,
-    idToken: authResult.IdToken,
-    refreshToken: authResult.RefreshToken || null,
-    tokenType: authResult.TokenType || 'Bearer',
-    expiresIn,
-    expiresAt,
-    userPoolId: config.userPoolId,
-    clientId: config.clientId,
-    region: config.region,
-  };
-
-  saveSession(session);
-  return session;
+  return refreshInFlight;
 }
 
 /**
- * Sign Out - clear local session
- */
-export function signOut() {
-  saveSession(null);
-}
-
-/**
- * Refresh access token using RefreshToken
- */
-export async function refreshToken() {
-  const session = getStoredSession();
-  if (!session || !session.refreshToken) {
-    signOut();
-    return null;
-  }
-
-  const config = getCognitoConfig(session);
-  const payload = {
-    AuthFlow: 'REFRESH_TOKEN_AUTH',
-    ClientId: config.clientId,
-    AuthParameters: {
-      REFRESH_TOKEN: session.refreshToken,
-    },
-  };
-
-  try {
-    const result = await callCognitoAuth('InitiateAuth', 'InitiateAuth', payload, config.region);
-    if (result && result.AuthenticationResult) {
-      const authResult = result.AuthenticationResult;
-      const expiresIn = authResult.ExpiresIn || 3600;
-
-      const updatedSession = {
-        ...session,
-        accessToken: authResult.AccessToken || session.accessToken,
-        idToken: authResult.IdToken || session.idToken,
-        expiresIn,
-        expiresAt: Date.now() + expiresIn * 1000,
-      };
-
-      saveSession(updatedSession);
-      return updatedSession;
-    }
-  } catch (err) {
-    console.warn('Cognito token refresh failed:', err.message);
-    signOut();
-  }
-
-  return null;
-}
-
-/**
- * Retrieve current valid session (auto-refreshing if near expiration)
+ * Return a valid session, restoring from the refresh token and renewing a
+ * near-expiry token as needed. Returns null when no valid session exists.
  */
 export async function getSession() {
-  const session = getStoredSession();
-  if (!session) return null;
-
-  // Refresh if token expires within 2 minutes
-  if (session.expiresAt && Date.now() >= session.expiresAt - 120000) {
-    if (session.refreshToken) {
-      return await refreshToken();
-    } else {
-      signOut();
-      return null;
-    }
+  if (!current) {
+    // Nothing in memory: this is either a fresh load or a post-logout state.
+    return readStoredRefresh() ? await refreshSession() : null;
   }
 
-  return session;
+  if (!current.expiresAt || Date.now() >= current.expiresAt - EXPIRY_SKEW_MS) {
+    return await refreshSession();
+  }
+
+  return publicSession(current);
 }
 
 /**
- * Helper to get currently active access token
+ * The bearer token for protected API calls, or null when unauthenticated.
+ * `preferred` lets the API client retry with the other token kind if the
+ * API Gateway authorizer turns out to be configured for id tokens.
  */
-export async function getAccessToken() {
+export async function getBearerToken(preferred = null) {
   const session = await getSession();
-  return session ? session.accessToken : null;
+  if (!session || !current) return null;
+
+  const kind = preferred || current.tokenType || 'access';
+  if (kind === 'id' && current.idToken) return current.idToken;
+  return current.accessToken;
+}
+
+/** Drop all client-side authentication state without contacting the network. */
+export function clearLocalSession() {
+  current = null;
+  clearStoredRefresh();
+  notify();
+}
+
+/**
+ * Sign out. Asks the Lambda to revoke the refresh token and globally sign the
+ * user out of the pool, then clears local state regardless of the outcome — a
+ * failed revocation must never leave the user stuck in a signed-in UI.
+ */
+export async function signOut() {
+  const refreshToken = current?.refreshToken || readStoredRefresh()?.refreshToken || null;
+  const accessToken = current?.accessToken || null;
+
+  // Clear locally first so the UI can never keep showing protected content.
+  clearLocalSession();
+
+  if (!refreshToken && !accessToken) return { revoked: false };
+
+  try {
+    const data = await postAuth('signout', { refreshToken, accessToken });
+    return { revoked: Boolean(data?.revoked?.refreshToken || data?.revoked?.global) };
+  } catch {
+    // Best effort: the local session is already gone.
+    return { revoked: false };
+  }
+}
+
+export async function forgotPassword(username) {
+  const data = await postAuth('forgot-password', { username });
+  return data.message || 'If an account exists for that username, a reset code has been sent.';
+}
+
+export async function confirmForgotPassword(username, code, newPassword) {
+  const data = await postAuth('confirm-forgot-password', { username, code, newPassword });
+  return data.message || 'Password updated. You can now sign in.';
+}
+
+export async function confirmSignUp(username, code) {
+  const data = await postAuth('confirm-signup', { username, code });
+  return data.message || 'Account confirmed. You can now sign in.';
+}
+
+export async function resendConfirmationCode(username) {
+  const data = await postAuth('resend-confirmation', { username });
+  return data.message || 'A new confirmation code has been sent.';
+}
+
+export async function signUp(username, password, email) {
+  const data = await postAuth('signup', { username, password, email });
+  return { userConfirmed: Boolean(data.userConfirmed), message: data.message };
+}
+
+/** Test seam: reset all module state between tests. */
+export function __resetAuthForTests() {
+  current = null;
+  refreshInFlight = null;
+  listeners.clear();
+  clearStoredRefresh();
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Wind, Shield, Globe, Sun, Moon, Server, Radio, KeyRound, RefreshCw, CheckCircle2, AlertTriangle, Layers } from 'lucide-react';
+import { Wind, Shield, Globe, Sun, Moon, Server, Radio, RefreshCw, ShieldCheck, ShieldAlert, AlertTriangle, Layers, LogOut } from 'lucide-react';
 import { soundEffects } from '../../utils/soundEffects';
 
 export default function Navbar({
@@ -19,7 +19,9 @@ export default function Navbar({
   isStale = false,
   lastUpdated = null,
   session = null,
-  onOpenAuthModal,
+  isVerified = false,
+  isAuthBusy = false,
+  onSignOut,
 }) {
   const tabs = [
     {
@@ -187,18 +189,40 @@ export default function Navbar({
             </div>
           )}
 
-          {/* Cognito Auth Status Button */}
-          <button
-            onClick={onOpenAuthModal}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-bold shadow-2xs transition-all active:scale-95 ${
-              session
-                ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800'
-                : 'bg-white/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+          {/* Session indicator. "Authenticated Session Active" requires that API
+              Gateway's JWT authorizer has accepted this token on a real
+              protected request — `isVerified`, not a local flag. */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-bold shadow-2xs ${
+              isVerified
+                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                : 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800'
             }`}
-            title="AWS Cognito Auth Settings"
+            title={
+              isVerified
+                ? 'Authenticated Session Active — verified against the AeroSense API authorizer'
+                : 'Signed in to Cognito; awaiting confirmation from a protected API call'
+            }
           >
-            <KeyRound className="w-3.5 h-3.5 text-indigo-500" />
-            <span className="hidden sm:inline">{session ? session.username : 'Cognito Auth'}</span>
+            {isVerified ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldAlert className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">
+              {isVerified ? 'Authenticated Session Active' : 'Verifying session…'}
+            </span>
+            {session?.displayName && (
+              <span className="font-mono text-[10px] opacity-80 max-w-[140px] truncate" title={session.displayName}>
+                {session.displayName}
+              </span>
+            )}
+          </div>
+
+          <button
+            onClick={onSignOut}
+            disabled={isAuthBusy}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 dark:hover:bg-rose-950/50 dark:hover:text-rose-300 text-xs font-bold shadow-2xs transition-all active:scale-95 disabled:opacity-50"
+            title="Sign out of AeroSense"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{isAuthBusy ? 'Signing out…' : 'Sign out'}</span>
           </button>
 
           {/* Dark / Light Theme Toggle */}
