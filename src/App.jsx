@@ -8,6 +8,7 @@ import { soundEffects } from './utils/soundEffects';
 import { fetchZones, fetchLatestTelemetry, fetchTelemetryHistory, fetchAlerts } from './services/aeroSenseApi';
 import { mapBackendTelemetry, extractHistorySparklines, UNPUBLISHED_METRICS } from './utils/telemetryMapper';
 import { useAuth } from './context/AuthProvider';
+import ErrorBoundary from './components/ErrorBoundary';
 import { ShieldAlert, Volume2, VolumeX, Zap, RefreshCw, AlertCircle, ShieldOff, Info } from 'lucide-react';
 
 /** How often AWS Live re-polls the backend. */
@@ -654,6 +655,7 @@ export default function App() {
           )}
 
           {activeTab === 'dashboard' && !(mode === 'aws_live' && !hasLiveData) && (
+            <ErrorBoundary label="The dashboard" resetKeys={[selectedZone, mode, lastUpdated]}>
             <AeroDashboard
               theme={theme}
               aqi={aqi}
@@ -697,11 +699,17 @@ export default function App() {
               onOpenHepa={() => setActiveTab('hepa')}
               isDarkMode={isDarkMode}
             />
+            </ErrorBoundary>
           )}
 
-          {activeTab === 'hepa' && <HepaChamber />}
+          {activeTab === 'hepa' && (
+            <ErrorBoundary label="The HEPA chamber">
+              <HepaChamber />
+            </ErrorBoundary>
+          )}
 
           {activeTab === 'earthmap' && (
+            <ErrorBoundary label="The global AQI map">
             <GlobalAqiMap
               onSyncTelemetry={handleSyncTelemetryFromMap}
               isAlarmMuted={isAlarmMuted}
@@ -710,6 +718,7 @@ export default function App() {
               onStopAlarm={handleStopAlarm}
               onReenableAlarm={handleReenableAlarm}
             />
+            </ErrorBoundary>
           )}
         </main>
 

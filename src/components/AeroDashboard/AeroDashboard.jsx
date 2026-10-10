@@ -7,6 +7,8 @@ import HvacControlSidebar from './HvacControlSidebar';
 import TelemetryAuditCard from './TelemetryAuditCard';
 import BenchmarkComparison from './BenchmarkComparison';
 import ScientificOverview from './ScientificOverview';
+import { formatNumber, isFiniteNumber, below } from '../../utils/formatNumber';
+import ErrorBoundary from '../ErrorBoundary';
 
 export default function AeroDashboard({
   theme,
@@ -346,10 +348,7 @@ export default function AeroDashboard({
     mode === 'aws_live' && awsOutdoorPm25 !== null ? awsOutdoorPm25 : ambientPM25;
 
   /** Format a possibly-absent reading for display. */
-  const fmt = (value, digits = 1, suffix = '') =>
-    typeof value === 'number' && Number.isFinite(value)
-      ? `${value.toFixed(digits)}${suffix}`
-      : 'n/a';
+  const fmt = (value, digits = 1, suffix = '') => formatNumber(value, { digits, suffix });
 
   const pm25Hist = mode === 'aws_live' ? (sparklines.pm25History || localPm25History) : localPm25History;
   const co2Hist = mode === 'aws_live' ? (sparklines.co2History || localCo2History) : localCo2History;
@@ -465,10 +464,11 @@ export default function AeroDashboard({
         {/* Right Column: 3D Digital Twin, 4 Metrics, Telemetry & Benchmark */}
         <div className="lg:col-span-8 space-y-6">
           {/* 3D WebGL Industrial HVAC & Dynamic Room Digital Twin */}
+          <ErrorBoundary label="The 3D digital twin" resetKeys={[selectedZone, mode]}>
           <HvacDigitalTwin3D
-            damperPct={activeDamperPct ?? 0}
-            fanSpeedPct={activeFanSpeedPct ?? 0}
-            filterHealthPct={activeFilterHealthPct ?? 100}
+            damperPct={activeDamperPct}
+            fanSpeedPct={activeFanSpeedPct}
+            filterHealthPct={activeFilterHealthPct}
             roomVolM3={roomVolM3}
             ceilingHeightM={ceilingHeightM}
             occupancy={occupancy}
@@ -478,8 +478,10 @@ export default function AeroDashboard({
             targetCO2Max={targetCO2Max}
             theme={theme}
           />
+          </ErrorBoundary>
 
           {/* 4 Key Real-Time Metrics Grid */}
+          <ErrorBoundary label="The metrics grid" resetKeys={[selectedZone, pm25, co2]}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Metric 1: Indoor PM2.5 */}
             <MetricCard
@@ -543,9 +545,9 @@ export default function AeroDashboard({
               unit="%"
               latexUnit="%"
               icon={ShieldCheck}
-              badge={`ΔP: ${fmt(activeCurrentDpPa, 0, ' Pa')}`}
+              badge={`ΔP: ${formatNumber(activeCurrentDpPa, { digits: 0, suffix: ' Pa' })}`}
               badgeColor={
-                activeFilterHealthPct < 30
+                below(activeFilterHealthPct, 30)
                   ? 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-800'
                   : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-800'
               }
@@ -554,15 +556,17 @@ export default function AeroDashboard({
               history={filterHist}
               accentColor="#059669"
               description={
-                mode === 'aws_live' && activeFilterHealthPct === null
+                mode === 'aws_live' && !isFiniteNumber(activeFilterHealthPct)
                   ? 'Not published by the API'
-                  : `Dust Cake: ${accumulatedDustG.toFixed(1)} g (Estimated)`
+                  : `Dust Cake: ${formatNumber(accumulatedDustG, { digits: 1 })} g (Estimated)`
               }
               isEstimated={mode === 'aws_live'}
             />
           </div>
+          </ErrorBoundary>
 
           {/* Machine Telemetry & Closed-Loop Actuation Audit */}
+          <ErrorBoundary label="The telemetry audit panel" resetKeys={[selectedZone, activeDamperPct]}>
           <TelemetryAuditCard
             damperPct={activeDamperPct}
             recommendedDamperPct={recommendedDamperPct}
@@ -575,9 +579,12 @@ export default function AeroDashboard({
             recommendationOnly={recommendationOnly}
             selectedZone={selectedZone}
           />
+          </ErrorBoundary>
 
           {/* Parallel Benchmark Comparison Card */}
-          <BenchmarkComparison aiPowerKw={activeFanPowerKw} />
+          <ErrorBoundary label="The benchmark comparison" compact resetKeys={[activeFanPowerKw]}>
+            <BenchmarkComparison aiPowerKw={activeFanPowerKw} />
+          </ErrorBoundary>
         </div>
       </div>
 

@@ -4,10 +4,14 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Eye, Box, Maximize2, RotateCcw, Activity, Shield, Wind, Sparkles } from 'lucide-react';
 import { soundEffects } from '../../utils/soundEffects';
 
+import { formatPercent, numberOr } from '../../utils/formatNumber';
+
 export default function HvacDigitalTwin3D({
-  damperPct = 20,
-  fanSpeedPct = 28,
-  filterHealthPct = 97.2,
+  // Null when AWS Live has no value. Geometry uses numberOr(); the readout
+  // chips show N/A so a missing metric is never drawn as a real number.
+  damperPct = null,
+  fanSpeedPct = null,
+  filterHealthPct = null,
   roomVolM3 = 500,
   ceilingHeightM = 3.5,
   occupancy = 28,
@@ -17,6 +21,11 @@ export default function HvacDigitalTwin3D({
   targetCO2Max = 850,
   theme,
 }) {
+  // Visual-only coercions for WebGL maths, which cannot accept null.
+  const safeDamperPct = numberOr(damperPct, 0);
+  const safeFanSpeedPct = numberOr(fanSpeedPct, 0);
+  const safeFilterHealthPct = numberOr(filterHealthPct, 100);
+
   const mountRef = useRef(null);
   const controlsRef = useRef(null);
   const cameraRef = useRef(null);
@@ -31,23 +40,26 @@ export default function HvacDigitalTwin3D({
   const [activeCameraView, setActiveCameraView] = useState('iso');
 
   // Mutable refs for animation loop
+  // The animation loop performs arithmetic on these every frame, so it is fed
+  // the coerced values only. A null here would produce NaN geometry and a
+  // black canvas.
   const simStateRef = useRef({
-    damperPct,
-    fanSpeedPct,
-    filterHealthPct,
-    ambientPM25,
-    indoorPM25,
+    damperPct: safeDamperPct,
+    fanSpeedPct: safeFanSpeedPct,
+    filterHealthPct: safeFilterHealthPct,
+    ambientPM25: numberOr(ambientPM25, 0),
+    indoorPM25: numberOr(indoorPM25, 0),
   });
 
   useEffect(() => {
     simStateRef.current = {
-      damperPct,
-      fanSpeedPct,
-      filterHealthPct,
-      ambientPM25,
-      indoorPM25,
+      damperPct: safeDamperPct,
+      fanSpeedPct: safeFanSpeedPct,
+      filterHealthPct: safeFilterHealthPct,
+      ambientPM25: numberOr(ambientPM25, 0),
+      indoorPM25: numberOr(indoorPM25, 0),
     };
-  }, [damperPct, fanSpeedPct, filterHealthPct, ambientPM25, indoorPM25]);
+  }, [safeDamperPct, safeFanSpeedPct, safeFilterHealthPct, ambientPM25, indoorPM25]);
 
   useEffect(() => {
     const container = mountRef.current;
@@ -582,10 +594,10 @@ export default function HvacDigitalTwin3D({
         {/* Live Telemetry Chips */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-            DAMPER: {damperPct.toFixed(1)}%
+            DAMPER: {formatPercent(damperPct)}
           </span>
           <span className="text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-            FAN: {fanSpeedPct.toFixed(1)}% RPM
+            FAN: {formatPercent(fanSpeedPct)} RPM
           </span>
           <span className="text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
             ROOM: {roomVolM3}m³

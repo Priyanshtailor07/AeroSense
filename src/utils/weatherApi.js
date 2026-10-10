@@ -3,6 +3,18 @@
  * 100% Free, No API Key Required, Worldwide Live Meteorological Telemetry
  */
 
+import { toFiniteNumber } from './formatNumber';
+
+/**
+ * Round a third-party value to `digits`, falling back when it is not a usable
+ * number. Returns a number, since these feed numeric state rather than display.
+ */
+function round(value, fallback, digits) {
+  const parsed = toFiniteNumber(value);
+  const base = parsed === null ? toFiniteNumber(fallback) ?? 0 : parsed;
+  return Number(base.toFixed(digits));
+}
+
 // WMO Weather Interpretation Code Mapper
 export function interpretWeatherCode(code) {
   if (code === 0) return { condition: 'Clear Sky', icon: 'Sun' };
@@ -91,12 +103,15 @@ export async function fetchLiveWeatherData(lat, lng, locationName = 'Selected Co
     const weatherInfo = interpretWeatherCode(weatherCurr.weather_code ?? 0);
 
     const aqi = Math.round(airCurr.us_aqi ?? Math.max(18, Math.min(240, Math.round(Math.abs(lat) * 2.2 + ((lng + 180) % 50) * 1.5))));
-    const pm25 = Number((airCurr.pm2_5 ?? (aqi * 0.55)).toFixed(1));
-    const pm10 = Number((airCurr.pm10 ?? (aqi * 1.15)).toFixed(1));
-    const co = Number(((airCurr.carbon_monoxide ? airCurr.carbon_monoxide / 1000 : 0.6) || 0.6).toFixed(1));
-    const no2 = Number((airCurr.nitrogen_dioxide ?? 24).toFixed(1));
-    const o3 = Number((airCurr.ozone ?? 35).toFixed(1));
-    const so2 = Number((airCurr.sulphur_dioxide ?? 6).toFixed(1));
+    // `??` alone is not enough here: this is a third-party feed, and a string
+    // or NaN would reach .toFixed() and throw. round() coerces first.
+    const pm25 = round(airCurr.pm2_5, aqi * 0.55, 1);
+    const pm10 = round(airCurr.pm10, aqi * 1.15, 1);
+    const coRaw = toFiniteNumber(airCurr.carbon_monoxide);
+    const co = round(coRaw === null ? null : coRaw / 1000, 0.6, 1);
+    const no2 = round(airCurr.nitrogen_dioxide, 24, 1);
+    const o3 = round(airCurr.ozone, 35, 1);
+    const so2 = round(airCurr.sulphur_dioxide, 6, 1);
 
     let status = 'Good Purity';
     if (aqi > 200) status = 'Hazardous Extreme';
@@ -124,7 +139,7 @@ export async function fetchLiveWeatherData(lat, lng, locationName = 'Selected Co
     const workSafety = generateWorkSafety(aqi, temp, humidity);
 
     return {
-      id: `live-${lat.toFixed(3)}-${lng.toFixed(3)}`,
+      id: `live-${round(lat, 0, 3)}-${round(lng, 0, 3)}`,
       name: locationName,
       country: countryName || (lat >= 0 ? 'Northern Region' : 'Southern Region'),
       region: 'Live Real-Time Satellite GIS',

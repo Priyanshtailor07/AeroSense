@@ -1,3 +1,4 @@
+import { formatNumber } from '../../utils/formatNumber';
 import React, { useState, useEffect, useRef } from 'react';
 import L from 'leaflet';
 import {
@@ -172,7 +173,7 @@ export default function GlobalAqiMap({
         soundEffects.playPop(520);
 
         // Fetch real-time Open-Meteo data for this point
-        const liveData = await fetchLiveWeatherData(lat, lng, `Geo Point [${lat.toFixed(2)}°, ${lng.toFixed(2)}°]`);
+        const liveData = await fetchLiveWeatherData(lat, lng, `Geo Point [${formatNumber(lat, { digits: 2 })}°, ${formatNumber(lng, { digits: 2 })}°]`);
         setIsLoadingApi(false);
 
         if (liveData) {
@@ -586,7 +587,7 @@ export default function GlobalAqiMap({
                           </span>
                         </div>
                         <span className="text-[10px] font-mono text-sky-400 bg-sky-950/80 px-2 py-0.5 rounded">
-                          {item.lat.toFixed(1)}°, {item.lng.toFixed(1)}°
+                          {formatNumber(item.lat, { digits: 1 })}°, {formatNumber(item.lng, { digits: 1 })}°
                         </span>
                       </button>
                     ))}
@@ -636,7 +637,7 @@ export default function GlobalAqiMap({
               <div className="absolute top-2.5 left-2.5 z-[400] bg-slate-950/90 backdrop-blur-md px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl border border-slate-800 text-[11px] sm:text-xs text-white shadow-xl flex items-center gap-2 pointer-events-none max-w-[90%]">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
                 <span className="font-mono font-bold tracking-wide truncate">
-                  GPS: {selectedStation.lat.toFixed(3)}°N, {selectedStation.lng.toFixed(3)}°E
+                  GPS: {formatNumber(selectedStation.lat, { digits: 3 })}°N, {formatNumber(selectedStation.lng, { digits: 3 })}°E
                 </span>
                 <span className="text-slate-500 hidden sm:inline">•</span>
                 <span className="text-slate-400 text-[10px] sm:text-[11px] hidden sm:inline">Click map to inspect</span>
@@ -701,7 +702,7 @@ export default function GlobalAqiMap({
                 </h2>
                 <p className="text-xs font-medium text-slate-600 mt-0.5 flex items-center gap-1.5">
                   <MapPin className="w-3.5 h-3.5 text-sky-600" />
-                  <span>{selectedStation.country} • Lat {selectedStation.lat.toFixed(2)}°, Lng {selectedStation.lng.toFixed(2)}°</span>
+                  <span>{selectedStation.country} • Lat {formatNumber(selectedStation.lat, { digits: 2 })}°, Lng {formatNumber(selectedStation.lng, { digits: 2 })}°</span>
                 </p>
               </div>
 

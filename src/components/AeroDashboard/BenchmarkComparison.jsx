@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatNumber } from '../../utils/formatNumber';
 import { BarChart3, CheckCircle2, XCircle } from 'lucide-react';
 
 export default function BenchmarkComparison({ aiPowerKw = 0.92 }) {
@@ -42,7 +43,7 @@ export default function BenchmarkComparison({ aiPowerKw = 0.92 }) {
             <div className="flex justify-between items-center py-1 border-b border-emerald-100 dark:border-emerald-900/40">
               <span className="text-slate-600 dark:text-slate-400">Average Fan Power Draw:</span>
               <span className="font-mono font-bold text-slate-900 dark:text-white">
-                {typeof aiPowerKw === 'number' ? aiPowerKw.toFixed(2) : '0.92'} kW
+                {formatNumber(aiPowerKw, { digits: 2, suffix: ' kW' })}
               </span>
             </div>
 
