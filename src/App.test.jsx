@@ -159,6 +159,65 @@ describe('AWS Live startup', () => {
   });
 });
 
+describe('API 500 (the live incident)', () => {
+  // GET /zones and /alerts returned 500 in production because the API Lambda
+  // scanned the whole table and hit its 3s timeout. The dashboard must stay
+  // usable and must never substitute simulated values.
+  it('shows a recoverable error when /zones returns 500, without crashing', async () => {
+    fetchMock.on('/zones', jsonResponse({ message: 'Internal Server Error' }, 500));
+
+    await renderSignedIn();
+
+    expect((await screen.findAllByText(/returned 500/i)).length).toBeGreaterThan(0);
+    // The shell survives: navigation and sign-out are still present.
+    expect(screen.getByRole('button', { name: /sign out of aerosense/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /global aqi map/i })).toBeInTheDocument();
+    // No dashboard populated with invented readings.
+    expect(screen.queryByTestId('dashboard')).not.toBeInTheDocument();
+  });
+
+  it('keeps telemetry visible when only /alerts fails', async () => {
+    fetchMock.on('/zones', jsonResponse({ count: 1, zones: ['zone-01'] }));
+    fetchMock.on('/telemetry/latest', jsonResponse(wrapItem(telemetry('zone-01', { aqi: 61, pm25: 12.4, co2: 702 }))));
+    fetchMock.on('/telemetry/history', jsonResponse({ zone_id: 'zone-01', items: [] }));
+    fetchMock.on('/alerts', jsonResponse({ message: 'Internal Server Error' }, 500));
+
+    await renderSignedIn();
+
+    // A failing supplementary call must not discard the telemetry we have.
+    await waitFor(() => expect(screen.getByTestId('aqi')).toHaveTextContent('61'));
+    expect(screen.getByTestId('alerts')).toHaveTextContent('0');
+  });
+
+  it('offers a working retry that refetches', async () => {
+    let attempts = 0;
+    fetchMock.on('/zones', () => {
+      attempts += 1;
+      return attempts === 1
+        ? jsonResponse({ message: 'Internal Server Error' }, 500)
+        : jsonResponse({ count: 1, zones: ['zone-01'] });
+    });
+    fetchMock.on('/telemetry/latest', jsonResponse(wrapItem(telemetry('zone-01', { aqi: 61, pm25: 12.4, co2: 702 }))));
+    fetchMock.on('/telemetry/history', jsonResponse({ zone_id: 'zone-01', items: [] }));
+    fetchMock.on('/alerts', jsonResponse({ count: 0, items: [] }));
+
+    await renderSignedIn();
+    await screen.findAllByText(/returned 500/i);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: /retry connection/i }));
+    await waitFor(() => expect(attempts).toBeGreaterThan(1));
+  });
+
+  it('never falls back to simulated values on a 500', async () => {
+    fetchMock.on('/zones', jsonResponse({ message: 'Internal Server Error' }, 500));
+    await renderSignedIn();
+    await screen.findAllByText(/returned 500/i);
+
+    // Mode stays AWS Live; it does not silently become a simulation.
+    expect(screen.queryByText(/local simulation mode/i)).not.toBeInTheDocument();
+  });
+});
+
 describe('real zone identifiers', () => {
   it('uses the API zone id verbatim and invents no display name', async () => {
     // The deployed API returns exactly this: ids only, no human-readable names.

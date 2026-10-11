@@ -31,6 +31,8 @@ export default function App() {
   /** Metric keys the API did not supply for the current record. */
   const [unavailableMetrics, setUnavailableMetrics] = useState([]);
   const [noticeDismissed, setNoticeDismissed] = useState(false);
+  /** Bumped by Retry to re-run the zone fetch when the zone list itself failed. */
+  const [zonesReloadKey, setZonesReloadKey] = useState(0);
 
   // Additional AWS Live Telemetry & Optimizer State.
   // The five metrics the BuildingTelemetry API does not publish start as null
@@ -299,7 +301,7 @@ export default function App() {
       cancelled = true;
       controller.abort();
     };
-  }, [mode]);
+  }, [mode, zonesReloadKey]);
 
   // Poll the selected zone. Changing zone tears down the previous cycle, which
   // aborts its in-flight requests so they cannot land late.
@@ -335,7 +337,16 @@ export default function App() {
   }, []);
 
   const handleRetry = useCallback(() => {
-    if (!selectedZoneRef.current) return;
+    setApiError(null);
+    setApiErrorKind(null);
+
+    // When /zones itself failed there is no selected zone, so retrying
+    // telemetry would be a no-op. Re-run the zone fetch instead.
+    if (!selectedZoneRef.current) {
+      setZonesReloadKey((k) => k + 1);
+      return;
+    }
+
     const controller = new AbortController();
     abortRef.current = controller;
     fetchAwsLiveData(selectedZoneRef.current, { isInitial: true, signal: controller.signal });

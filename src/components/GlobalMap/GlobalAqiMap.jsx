@@ -1,4 +1,5 @@
 import { formatNumber } from '../../utils/formatNumber';
+import { useGeolocation, GEO_STATUS } from '../../hooks/useGeolocation';
 import React, { useState, useEffect, useRef } from 'react';
 import L from 'leaflet';
 import {
@@ -77,9 +78,10 @@ export default function GlobalAqiMap({
   const [localAlarmMuted, setLocalAlarmMuted] = useState(false);
   const [syncedSuccess, setSyncedSuccess] = useState(false);
   const [tempUnit, setTempUnit] = useState('C'); // 'C' | 'F'
-  const [isLocatingUser, setIsLocatingUser] = useState(false);
-  /** Explicit geolocation outcome; null when nothing has been attempted. */
-  const [geoError, setGeoError] = useState(null);
+  /** Geolocation state machine: not_requested | requesting | granted | denied | unavailable | error */
+  const geo = useGeolocation();
+  /** Set when the outdoor AQI provider itself fails. */
+  const [providerError, setProviderError] = useState(null);
 
   const isAlarmMuted = externalMuted !== undefined ? externalMuted : localAlarmMuted;
 
@@ -328,50 +330,47 @@ export default function GlobalAqiMap({
     }
   };
 
-  // 5. Locate Current User via Browser Geolocation
+  // 5. Locate the user. Driven by useGeolocation, which only ever runs from
+  //    this explicit user action and never on mount.
   const handleLocateMe = () => {
-    if (!navigator.geolocation) {
-      setGeoError('This browser does not provide location access. Search for a city instead.');
-      return;
-    }
-
-    setGeoError(null);
-    setIsLocatingUser(true);
     soundEffects.playPop(480);
+    geo.request();
+  };
 
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude: lat, longitude: lng } = pos.coords;
-        setIsLocatingUser(false);
+  /**
+   * React to a granted position. Runs only when real coordinates arrive, so a
+   * denial or timeout can never move the map or fabricate a reading.
+   */
+  useEffect(() => {
+    if (geo.status !== GEO_STATUS.GRANTED || !geo.coords) return undefined;
 
-        const map = mapInstanceRef.current;
-        if (map) {
-          map.flyTo([lat, lng], 10, { duration: 1.5 });
-        }
+    let cancelled = false;
+    const { latitude: lat, longitude: lng } = geo.coords;
 
-        setIsLoadingApi(true);
-        const liveData = await fetchLiveWeatherData(lat, lng, 'My GPS Location', 'Local Area');
-        setIsLoadingApi(false);
+    const map = mapInstanceRef.current;
+    if (map) map.flyTo([lat, lng], 10, { duration: 1.5 });
 
+    (async () => {
+      setIsLoadingApi(true);
+      try {
+        const liveData = await fetchLiveWeatherData(lat, lng, 'Your location', 'Detected by browser');
+        if (cancelled) return;
         if (liveData) {
           setSelectedStation(liveData);
           soundEffects.playPop(720);
+        } else {
+          // The provider failed; say so rather than showing stale values as new.
+          setProviderError('Outdoor air quality could not be loaded for your location.');
         }
-      },
-      (err) => {
-        setIsLocatingUser(false);
-        console.warn('Geolocation error:', err);
-        // Say plainly that the location was NOT detected, rather than falling
-        // back to a default position that would look like a real fix.
-        setGeoError(
-          err?.code === 1
-            ? 'Location permission was denied. Search for a city instead.'
-            : 'Your location could not be determined. Search for a city instead.'
-        );
-      },
-      { timeout: 10000, enableHighAccuracy: true }
-    );
-  };
+      } finally {
+        if (!cancelled) setIsLoadingApi(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [geo.status, geo.coords]);
 
   // 6. Search City Geocoding
   const handleSearchInputChange = async (e) => {
@@ -502,26 +501,48 @@ export default function GlobalAqiMap({
               from the Open-Meteo public API. These are ambient readings for a geographic point and are
               separate from the indoor zone telemetry on the dashboard.
             </p>
+            {/* Stated before any prompt, so the permission request is expected
+                rather than a surprise. Search always works without it. */}
+            {geo.status === GEO_STATUS.NOT_REQUESTED && (
+              <p className="text-[11px] text-slate-400 max-w-2xl">
+                Optional: allow location access to centre the map on you and load nearby outdoor readings.
+                Everything here works without it — search for any place instead.
+              </p>
+            )}
+            {(geo.status === GEO_STATUS.DENIED || geo.status === GEO_STATUS.UNAVAILABLE) && (
+              <p className="text-[11px] text-slate-400 max-w-2xl">
+                Continuing without location. Use the search field to choose any place.
+              </p>
+            )}
           </div>
 
           {/* Map Layer Selector & GPS Locate Button */}
           <div className="flex flex-col items-end gap-1.5 shrink-0">
-            {geoError && (
-              <p role="status" className="text-[11px] text-amber-300 bg-amber-950/50 border border-amber-800 rounded-lg px-2.5 py-1 max-w-xs text-right">
-                {geoError}
+            {/* One message area for the geolocation outcome and provider errors.
+                A denial or failure is stated plainly and always points at the
+                search field, which works without any location permission. */}
+            {(geo.message || providerError) && (
+              <p
+                role="status"
+                className="text-[11px] text-amber-300 bg-amber-950/50 border border-amber-800 rounded-lg px-2.5 py-1 max-w-xs text-right"
+              >
+                {providerError || geo.message}
               </p>
             )}
             <div className="flex flex-wrap items-center gap-2">
-            {/* Locate Me GPS Button */}
-            <button
-              onClick={handleLocateMe}
-              disabled={isLocatingUser}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-black bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg active:scale-95 transition"
-              title="Detect my location and fetch real-time local weather & air quality"
-            >
-              <LocateFixed className={`w-4 h-4 ${isLocatingUser ? 'animate-spin' : ''}`} />
-              <span>{isLocatingUser ? 'Locating…' : 'Use my location'}</span>
-            </button>
+            {/* Location access is requested only by this explicit action. */}
+            {geo.status !== GEO_STATUS.DENIED && geo.status !== GEO_STATUS.UNAVAILABLE && (
+              <button
+                onClick={handleLocateMe}
+                disabled={geo.isRequesting}
+                aria-label="Use my location to centre the map and load nearby outdoor air quality"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-black bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg active:scale-95 transition disabled:opacity-60 disabled:active:scale-100"
+                title="Your browser will ask permission. The map works without it."
+              >
+                <LocateFixed className={`w-4 h-4 ${geo.isRequesting ? 'animate-spin' : ''}`} aria-hidden="true" />
+                <span>{geo.isRequesting ? 'Locating…' : 'Use my location'}</span>
+              </button>
+            )}
 
             {/* Map Engine Toggle: Satellite & Streets (No Tactical Dark) */}
             <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
