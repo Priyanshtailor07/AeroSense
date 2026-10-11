@@ -414,7 +414,7 @@ export default function App() {
   const currentTextColor = isDarkMode ? 'text-slate-100' : 'text-slate-900';
 
   return (
-    <div className={`min-h-screen bg-gradient-to-br ${currentBgGradient} transition-all duration-700 relative overflow-x-hidden p-3 sm:p-6 ${currentTextColor}`}>
+    <div className={`min-h-screen bg-gradient-to-br ${currentBgGradient} transition-all duration-700 relative overflow-x-hidden px-3 sm:px-6 py-3 sm:py-5 ${currentTextColor}`}>
       {/* 1. Flashing Hazard Perimeter Strobe */}
       {showScreenStrobe && (
         <div className="fixed inset-0 pointer-events-none z-50 hazard-active-border" />
@@ -462,7 +462,7 @@ export default function App() {
                         : 'bg-rose-950 text-rose-300 border-rose-800'
                     }`}
                   >
-                    {showScreenStrobe ? '🚨 ACTIVE BIO-HAZARD ALARM' : '⚠️ HIGH AQI (ALARM STOPPED)'}
+                    {showScreenStrobe ? 'Air quality hazard' : 'Air quality hazard · alarm muted'}
                   </span>
                   <span className="text-xs font-mono font-bold bg-white text-rose-700 px-2.5 py-0.5 rounded-full shadow-xs">
                     AQI {aqi} • PM2.5 {pm25} µg/m³
@@ -470,8 +470,8 @@ export default function App() {
                 </div>
                 <p className={`text-xs font-medium ${showScreenStrobe ? 'text-rose-100' : 'text-slate-300'}`}>
                   {showScreenStrobe
-                    ? 'Hazard audio siren and screen strobe active. Click STOP ALARM to silence and dismiss strobe.'
-                    : 'Hazard strobe and siren stopped. HEPA chamber filtration recommended.'}
+                    ? 'This browser alarm is advisory. Muting it changes nothing on the HVAC equipment.'
+                    : 'Browser alarm muted. The hazard reading is unchanged; AeroSense issues recommendations only.'}
                 </p>
               </div>
             </div>
@@ -481,19 +481,19 @@ export default function App() {
                 <button
                   onClick={handleStopAlarm}
                   className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black bg-white text-rose-950 hover:bg-rose-100 shadow-xl border-2 border-rose-400 active:scale-95 transition animate-pulse"
-                  title="Stop alarm, silence audio, and remove red screen strobe"
+                  title="Mute the browser alarm sound and strobe. This does not change any equipment."
                 >
                   <VolumeX className="w-4 h-4 text-rose-600" />
-                  <span>🛑 STOP ALARM</span>
+                  <span>Mute alarm</span>
                 </button>
               ) : (
                 <button
                   onClick={handleReenableAlarm}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 active:scale-95 transition"
-                  title="Turn alarm back on"
+                  title="Unmute the browser alarm"
                 >
                   <Volume2 className="w-4 h-4 text-emerald-400" />
-                  <span>🔊 Re-enable Alarm</span>
+                  <span>Unmute alarm</span>
                 </button>
               )}
 
@@ -502,7 +502,7 @@ export default function App() {
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black bg-white text-rose-950 hover:bg-rose-100 shadow-md active:scale-95 transition shrink-0"
               >
                 <Zap className="w-4 h-4 text-rose-600" />
-                <span>Engage HEPA 3D</span>
+                <span>View 3D HEPA model</span>
               </button>
             </div>
           </div>
@@ -622,7 +622,7 @@ export default function App() {
         />
 
         {/* Tab Modules */}
-        <main className="transition-opacity duration-300">
+        <main className="transition-opacity duration-300 space-y-5">
           {/* AWS Live holds the dashboard behind a loading state until genuine
               telemetry has arrived, so no card is ever populated with a
               placeholder reading. */}

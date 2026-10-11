@@ -81,7 +81,7 @@ async function renderSignedIn() {
   );
   // Anchor on the authenticated shell, not the dashboard: the loading, empty
   // and error states deliberately render in place of the dashboard.
-  return screen.findByTitle(/sign out of aerosense/i);
+  return screen.findByRole('button', { name: /sign out of aerosense/i });
 }
 
 beforeEach(() => {

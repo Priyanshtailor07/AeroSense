@@ -78,6 +78,8 @@ export default function GlobalAqiMap({
   const [syncedSuccess, setSyncedSuccess] = useState(false);
   const [tempUnit, setTempUnit] = useState('C'); // 'C' | 'F'
   const [isLocatingUser, setIsLocatingUser] = useState(false);
+  /** Explicit geolocation outcome; null when nothing has been attempted. */
+  const [geoError, setGeoError] = useState(null);
 
   const isAlarmMuted = externalMuted !== undefined ? externalMuted : localAlarmMuted;
 
@@ -329,10 +331,11 @@ export default function GlobalAqiMap({
   // 5. Locate Current User via Browser Geolocation
   const handleLocateMe = () => {
     if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser.');
+      setGeoError('This browser does not provide location access. Search for a city instead.');
       return;
     }
 
+    setGeoError(null);
     setIsLocatingUser(true);
     soundEffects.playPop(480);
 
@@ -358,7 +361,13 @@ export default function GlobalAqiMap({
       (err) => {
         setIsLocatingUser(false);
         console.warn('Geolocation error:', err);
-        alert('Could not access GPS location. Please check browser permissions or search manually.');
+        // Say plainly that the location was NOT detected, rather than falling
+        // back to a default position that would look like a real fix.
+        setGeoError(
+          err?.code === 1
+            ? 'Location permission was denied. Search for a city instead.'
+            : 'Your location could not be determined. Search for a city instead.'
+        );
       },
       { timeout: 10000, enableHighAccuracy: true }
     );
@@ -433,57 +442,35 @@ export default function GlobalAqiMap({
 
   return (
     <div className="space-y-5">
-      {/* 1. Flashing Emergency Hazard Alert Banner (when AQI > 150) */}
+      {/* Hazard alerting is owned by the single primary banner in App, which
+          renders above every tab and holds the alarm controls. A second
+          flashing banner here duplicated it and tracked alarm state
+          separately. A compact, non-flashing summary remains so the hazard is
+          still visible in this view. */}
       {selectedStation.isHazard && (
-        <div className="alert-flash-banner rounded-2xl p-4 text-white shadow-2xl border-2 border-rose-400 flex flex-col md:flex-row items-center justify-between gap-4 transition-all duration-300">
-          <div className="flex items-center gap-3.5">
-            <div className="p-2.5 rounded-xl bg-white text-rose-600 animate-bounce shrink-0 shadow-lg">
-              <ShieldAlert className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-black text-xs uppercase tracking-wider bg-black/40 px-2.5 py-0.5 rounded-full border border-white/40">
-                  🚨 CRITICAL AIR POLLUTION HAZARD DETECTED
-                </span>
-                <span className="text-xs font-mono font-bold bg-white text-rose-700 px-2 py-0.5 rounded-full shadow-sm">
-                  {selectedStation.name}: {selectedStation.aqi} AQI
-                </span>
-              </div>
-              <p className="text-xs text-rose-100 font-medium mt-1">
-                Fine particulate concentration ({selectedStation.pm25} µg/m³) exceeds safe biological limits. HEPA H13 filtration mandatory.
+        <div
+          role="status"
+          className="rounded-2xl border border-rose-300 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        >
+          <div className="flex items-start gap-2.5 min-w-0">
+            <ShieldAlert className="w-5 h-5 shrink-0 text-rose-600 dark:text-rose-400 mt-px" aria-hidden="true" />
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-rose-800 dark:text-rose-300">
+                Unhealthy outdoor air at {selectedStation.city || 'this location'}
+              </p>
+              <p className="text-[11px] text-rose-700/80 dark:text-rose-400/80 mt-0.5">
+                Outdoor AQI {selectedStation.aqi}. This is an ambient reading for the selected map location,
+                not indoor zone telemetry.
               </p>
             </div>
           </div>
-
-          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-            {isAlarmActive && !isAlarmMuted ? (
-              <button
-                onClick={handleToggleAlarm}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-white text-rose-950 hover:bg-rose-100 shadow-xl border-2 border-rose-400 active:scale-95 transition animate-pulse"
-                title="Stop alarm, silence audio, and remove red screen strobe"
-              >
-                <VolumeX className="w-4 h-4 text-rose-600" />
-                <span>🛑 STOP ALARM</span>
-              </button>
-            ) : (
-              <button
-                onClick={handleToggleAlarm}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 text-slate-300 border border-slate-700 hover:bg-slate-800 active:scale-95 transition"
-                title="Turn alarm back on"
-              >
-                <Volume2 className="w-4 h-4 text-emerald-400" />
-                <span>🔊 Re-enable Alarm</span>
-              </button>
-            )}
-
-            <button
-              onClick={handleSyncToMain}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-black bg-white text-rose-900 hover:bg-rose-50 shadow-lg active:scale-95 transition"
-            >
-              <Zap className="w-4 h-4 text-rose-600" />
-              <span>Engage Emergency HEPA</span>
-            </button>
-          </div>
+          <button
+            onClick={handleSyncToMain}
+            className="as-control as-focus shrink-0 inline-flex items-center gap-1.5 px-3.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white active:scale-[0.98] transition"
+          >
+            <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Send readings to dashboard</span>
+          </button>
         </div>
       )}
 
@@ -511,12 +498,20 @@ export default function GlobalAqiMap({
               Planetary Earth AQI, Live Weather & GIS Radar
             </h1>
             <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-              Explore authentic high-resolution satellite world imagery and street maps with real-time temperature, humidity, wind, and ISO 14001 occupational safety advisories.
+              <strong className="text-white">Outdoor</strong> air quality and weather for a selected location,
+              from the Open-Meteo public API. These are ambient readings for a geographic point and are
+              separate from the indoor zone telemetry on the dashboard.
             </p>
           </div>
 
           {/* Map Layer Selector & GPS Locate Button */}
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="flex flex-col items-end gap-1.5 shrink-0">
+            {geoError && (
+              <p role="status" className="text-[11px] text-amber-300 bg-amber-950/50 border border-amber-800 rounded-lg px-2.5 py-1 max-w-xs text-right">
+                {geoError}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
             {/* Locate Me GPS Button */}
             <button
               onClick={handleLocateMe}
@@ -525,7 +520,7 @@ export default function GlobalAqiMap({
               title="Detect my location and fetch real-time local weather & air quality"
             >
               <LocateFixed className={`w-4 h-4 ${isLocatingUser ? 'animate-spin' : ''}`} />
-              <span>{isLocatingUser ? 'Locating...' : '🎯 Locate Me (GPS)'}</span>
+              <span>{isLocatingUser ? 'Locating…' : 'Use my location'}</span>
             </button>
 
             {/* Map Engine Toggle: Satellite & Streets (No Tactical Dark) */}
@@ -549,6 +544,7 @@ export default function GlobalAqiMap({
                   </button>
                 );
               })}
+            </div>
             </div>
           </div>
         </div>

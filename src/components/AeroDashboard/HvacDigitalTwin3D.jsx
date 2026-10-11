@@ -38,6 +38,8 @@ export default function HvacDigitalTwin3D({
   const animationFrameIdRef = useRef(null);
 
   const [activeCameraView, setActiveCameraView] = useState('iso');
+  /** Set when a WebGL context cannot be created, so we can explain why. */
+  const [webglError, setWebglError] = useState(null);
 
   // Mutable refs for animation loop
   // The animation loop performs arithmetic on these every frame, so it is fed
@@ -79,7 +81,14 @@ export default function HvacDigitalTwin3D({
     cameraRef.current = camera;
 
     // 3. Renderer Setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    } catch (err) {
+      console.error('[AeroSense] WebGL unavailable:', err);
+      setWebglError('This browser or device could not start WebGL, so the 3D view cannot render.');
+      return undefined;
+    }
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.shadowMap.enabled = true;
@@ -606,8 +615,22 @@ export default function HvacDigitalTwin3D({
       </div>
 
       {/* 3D WebGL Canvas Container */}
-      <div className="relative w-full h-[400px] sm:h-[440px] rounded-2xl overflow-hidden border border-slate-800/80 shadow-inner bg-[#0a0910]">
-        <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      <div className="relative w-full aspect-[4/3] sm:aspect-[16/10] lg:aspect-[16/9] min-h-[18rem] max-h-[32rem] rounded-2xl overflow-hidden border border-slate-800/80 shadow-inner bg-[#0a0910]">
+        <div
+          ref={mountRef}
+          role="img"
+          aria-label="Interactive 3D model of the HVAC chamber. Readings are shown as text beneath it."
+          className="w-full h-full cursor-grab active:cursor-grabbing"
+        />
+
+        {webglError && (
+          <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center bg-slate-950/95">
+            <Box className="w-7 h-7 text-slate-500" aria-hidden="true" />
+            <p className="text-sm font-bold text-slate-200">3D view unavailable</p>
+            <p className="text-xs text-slate-400 max-w-sm leading-relaxed">{webglError}</p>
+            <p className="text-[11px] text-slate-500">All telemetry remains available in the cards above.</p>
+          </div>
+        )}
 
         {/* Camera View Switcher Overlay Buttons */}
         <div className="absolute top-3 right-3 flex items-center gap-1.5 z-20">

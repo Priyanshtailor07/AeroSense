@@ -1,19 +1,36 @@
 import React from 'react';
-import { Wind, Shield, Globe, Sun, Moon, Server, Radio, RefreshCw, ShieldCheck, ShieldAlert, AlertTriangle, Layers, LogOut } from 'lucide-react';
+import {
+  Wind, Shield, Globe, Sun, Moon, Server, Radio, RefreshCw,
+  ShieldCheck, ShieldAlert, AlertTriangle, Layers, LogOut,
+} from 'lucide-react';
 import { soundEffects } from '../../utils/soundEffects';
+
+/**
+ * Application header.
+ *
+ * Structured as two rows rather than one compressed strip:
+ *   row 1 — identity, operating mode, session and account actions
+ *   row 2 — section navigation, zone selector and connection status
+ *
+ * Every control shares one height (`as-control`) so nothing is clipped, and
+ * icon-only buttons carry accessible names.
+ */
+
+const TABS = [
+  { id: 'dashboard', label: 'Dashboard', icon: Wind },
+  { id: 'hepa', label: '3D HEPA Chamber', icon: Shield },
+  { id: 'earthmap', label: 'Global AQI Map', icon: Globe },
+];
 
 export default function Navbar({
   activeTab,
   setActiveTab,
   theme,
-  aqi,
-  humidity,
   isDarkMode = false,
   setIsDarkMode,
   mode = 'simulation',
   setMode,
   zones = [],
-  // No fabricated label: the API returns ids such as "zone-01" and no names.
   selectedZone = null,
   setSelectedZone,
   isApiLoading = false,
@@ -24,149 +41,133 @@ export default function Navbar({
   isAuthBusy = false,
   onSignOut,
 }) {
-  const tabs = [
-    {
-      id: 'dashboard',
-      label: 'AeroSense Dashboard',
-      shortLabel: 'Dashboard',
-      icon: Wind,
-      badge: `${aqi} AQI`,
-    },
-    {
-      id: 'hepa',
-      label: '3D HEPA Chamber',
-      shortLabel: '3D HEPA',
-      icon: Shield,
-      badge: 'H13 3D',
-    },
-    {
-      id: 'earthmap',
-      label: 'Global AQI & Earth Map',
-      shortLabel: 'Earth Map',
-      icon: Globe,
-      badge: 'Live Map',
-    },
-  ];
+  const isLive = mode === 'aws_live';
 
   const handleToggleTheme = () => {
     soundEffects.playPop(isDarkMode ? 440 : 580);
     setIsDarkMode(!isDarkMode);
   };
 
-  const handleModeSwitch = (newMode) => {
-    if (newMode === mode) return;
-    soundEffects.playPop(newMode === 'aws_live' ? 620 : 480);
-    if (setMode) setMode(newMode);
+  const handleModeSwitch = (next) => {
+    if (next === mode) return;
+    soundEffects.playPop(next === 'aws_live' ? 620 : 480);
+    if (setMode) setMode(next);
   };
 
   return (
-    <header className="glass-panel sticky top-2 sm:top-3 z-40 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 border border-white/80 dark:border-slate-700/80 shadow-md backdrop-blur-xl mb-4 sm:mb-6 transition-all duration-700">
-      <div className="flex flex-col lg:flex-row items-center justify-between gap-3 sm:gap-4">
-        {/* Brand & Logo */}
-        <div className="flex items-center justify-between w-full lg:w-auto gap-3">
-          <div className="flex items-center gap-2.5 sm:gap-3">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-slate-900 to-slate-800 text-white flex items-center justify-center shadow-md shrink-0">
-              <Wind className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <span className="font-extrabold text-sm sm:text-base tracking-tight text-slate-900 dark:text-white">
-                  AeroSense 3D
-                </span>
-                <span className="text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full bg-slate-900 text-white tracking-wide">
-                  v2.4
-                </span>
-              </div>
-              <p className="text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 font-medium truncate max-w-[200px] sm:max-w-none">
-                Ambient Environmental Intelligence & AWS BuildingTelemetry
-              </p>
-            </div>
+    <header className="sticky top-2 sm:top-3 z-40 mb-4 sm:mb-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl shadow-sm">
+      {/* Row 1 — identity, mode, session */}
+      <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2.5 min-w-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-slate-900 to-slate-700 dark:from-slate-800 dark:to-slate-700 flex items-center justify-center shrink-0">
+            <Wind className="w-4.5 h-4.5 text-teal-400" aria-hidden="true" />
           </div>
-
-          {/* Mode Switcher Pill (Local Simulation vs AWS Live) */}
-          <div className="flex items-center bg-slate-200/80 dark:bg-slate-800 p-1 rounded-xl border border-slate-300 dark:border-slate-700">
-            <button
-              onClick={() => handleModeSwitch('simulation')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all flex items-center gap-1 ${
-                mode === 'simulation'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-              }`}
-              title="Run offline Physics & IoT simulation loop"
-            >
-              <Radio className="w-3 h-3" />
-              <span>Sim</span>
-            </button>
-            <button
-              onClick={() => handleModeSwitch('aws_live')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all flex items-center gap-1 ${
-                mode === 'aws_live'
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-              }`}
-              title="Connect to AWS Live API Gateway & DynamoDB"
-            >
-              <Server className="w-3 h-3" />
-              <span>AWS Live</span>
-            </button>
+          <div className="min-w-0">
+            <h1 className="as-section-title text-sm sm:text-base text-slate-900 dark:text-white truncate">
+              AeroSense 3D
+            </h1>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate hidden sm:block">
+              Environmental intelligence &amp; HVAC optimisation
+            </p>
           </div>
         </div>
 
-        {/* Central Module Tabs */}
-        <nav className="flex items-center gap-1 bg-slate-100/90 dark:bg-slate-800/80 p-1 sm:p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-700/80 w-full lg:w-auto justify-between sm:justify-center overflow-x-auto scrollbar-none">
-          {tabs.map((tab) => {
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Operating mode */}
+          <div
+            role="group"
+            aria-label="Operating mode"
+            className="as-control flex items-center p-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+          >
+            <ModeButton active={!isLive} onClick={() => handleModeSwitch('simulation')} icon={Radio} label="Sim" title="Local simulated data" />
+            <ModeButton active={isLive} onClick={() => handleModeSwitch('aws_live')} icon={Server} label="AWS Live" title="Authenticated AWS telemetry" live />
+          </div>
+
+          {/* Session state. Reflects a token the API authorizer accepted. */}
+          <div
+            className={`as-control hidden md:flex items-center gap-1.5 px-2.5 text-xs font-bold border ${
+              isVerified
+                ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-900'
+                : 'text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-900'
+            }`}
+            title={
+              isVerified
+                ? 'Verified against the AeroSense API authorizer'
+                : 'Signed in; awaiting confirmation from a protected API call'
+            }
+          >
+            {isVerified ? <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" /> : <ShieldAlert className="w-3.5 h-3.5" aria-hidden="true" />}
+            <span className="hidden xl:inline">{isVerified ? 'Verified session' : 'Verifying…'}</span>
+            {session?.displayName && (
+              <span className="font-mono text-[10px] opacity-80 max-w-[11rem] truncate" title={session.displayName}>
+                {session.displayName}
+              </span>
+            )}
+          </div>
+
+          <button
+            onClick={handleToggleTheme}
+            aria-label={isDarkMode ? 'Switch to light theme' : 'Switch to dark theme'}
+            className="as-control as-focus w-9 flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+          >
+            {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" aria-hidden="true" /> : <Moon className="w-4 h-4" aria-hidden="true" />}
+          </button>
+
+          <button
+            onClick={onSignOut}
+            disabled={isAuthBusy}
+            aria-label="Sign out of AeroSense"
+            className="as-control as-focus flex items-center gap-1.5 px-2.5 text-xs font-bold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 dark:hover:bg-rose-950/50 dark:hover:text-rose-300 disabled:opacity-50 transition"
+          >
+            <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+            <span className="hidden sm:inline">{isAuthBusy ? 'Signing out…' : 'Sign out'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Row 2 — navigation, zone, connection */}
+      <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2 border-t border-slate-200 dark:border-slate-800 min-w-0">
+        <nav aria-label="Sections" className="flex items-center gap-1 overflow-x-auto scrollbar-none min-w-0">
+          {TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-lg text-xs font-bold transition-all relative shrink-0 ${
+                aria-current={isActive ? 'page' : undefined}
+                className={`as-control as-focus flex items-center gap-2 px-3 text-xs font-bold whitespace-nowrap shrink-0 transition ${
                   isActive
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs scale-100'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
+                    ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
-                <Icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
-                <span className="hidden sm:inline">{tab.label}</span>
-                <span className="sm:hidden text-[11px]">{tab.shortLabel}</span>
-                <span
-                  className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded font-mono ${
-                    isActive
-                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200'
-                      : 'bg-slate-200/60 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400'
-                  }`}
-                >
-                  {tab.badge}
-                </span>
+                <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>{tab.label}</span>
               </button>
             );
           })}
         </nav>
 
-        {/* Right Controls: Zone Selector, AWS Connection Status, Auth & Theme Toggle */}
-        <div className="flex items-center gap-2 flex-wrap justify-end w-full lg:w-auto min-w-0">
-          {/* AWS Zone Selector (Only visible in AWS Live mode) */}
-          {/* Zone selector. Labels come from the API; it returns ids like
-              "zone-01" and no names, so the id is shown as-is. */}
-          {mode === 'aws_live' && zones && zones.length > 0 && (
-            <div className="flex items-center gap-1.5 bg-white/90 dark:bg-slate-800 pl-2.5 pr-1.5 py-1 rounded-xl border border-indigo-300 dark:border-indigo-800 text-xs shadow-2xs">
-              <Layers className="w-3.5 h-3.5 text-indigo-500 shrink-0" aria-hidden="true" />
-              <label htmlFor="zone-select" className="sr-only">
-                Telemetry zone
-              </label>
-              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 hidden sm:inline">
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Zone selector. The API returns ids such as "zone-01" and no
+              display names, so the id is shown verbatim. */}
+          {isLive && zones.length > 0 && (
+            <div className="as-control flex items-center gap-1.5 pl-2.5 pr-1.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800">
+              <Layers className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" aria-hidden="true" />
+              <label htmlFor="zone-select" className="as-label hidden sm:inline">
                 Zone
-              </span>
+              </label>
               <select
                 id="zone-select"
                 value={selectedZone || ''}
                 onChange={(e) => setSelectedZone && setSelectedZone(e.target.value)}
                 disabled={zones.length <= 1}
-                className="bg-transparent text-xs font-mono font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded cursor-pointer disabled:cursor-default py-0.5"
+                title={zones.length <= 1 ? 'The API currently reports a single zone' : 'Select a telemetry zone'}
+                className="as-focus bg-transparent text-xs font-mono font-bold text-slate-900 dark:text-slate-100 focus:outline-none cursor-pointer disabled:cursor-default py-1 pr-1"
               >
                 {zones.map((z) => (
-                  <option key={z.zone_id} value={z.zone_id} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+                  <option key={z.zone_id} value={z.zone_id} className="bg-white dark:bg-slate-900">
                     {z.name || z.zone_id}
                   </option>
                 ))}
@@ -174,87 +175,59 @@ export default function Navbar({
             </div>
           )}
 
-          {/* Connection Status Pill */}
-          {mode === 'aws_live' ? (
+          {/* Connection status */}
+          {isLive ? (
             <div
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[11px] font-mono font-bold ${
+              className={`as-control flex items-center gap-1.5 px-2.5 text-[11px] font-mono font-bold border ${
                 isStale
-                  ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800'
-                  : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                  ? 'text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-900'
+                  : 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-900'
               }`}
+              role="status"
             >
               {isApiLoading ? (
-                <RefreshCw className="w-3 h-3 animate-spin text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <RefreshCw className="w-3 h-3 animate-spin" aria-hidden="true" />
               ) : isStale ? (
-                <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                <AlertTriangle className="w-3 h-3" aria-hidden="true" />
               ) : (
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" aria-hidden="true" />
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
               )}
-              <span>{isStale ? 'STALE' : isApiLoading ? 'SYNCING' : 'AWS LIVE'}</span>
+              <span>{isStale ? 'STALE' : isApiLoading ? 'SYNCING' : 'LIVE'}</span>
+              {/* Only shown when a poll has actually succeeded. */}
               {lastUpdated && (
-                <span className="opacity-60 hidden md:inline font-normal" title="Time of the last successful poll">
+                <span className="opacity-60 font-normal hidden lg:inline" title="Last successful poll">
                   {lastUpdated}
                 </span>
               )}
             </div>
           ) : (
-            <div className={`flex items-center gap-2 px-3 py-1 rounded-xl border text-xs font-semibold ${theme.badgeBg}`}>
-              <span className={`w-2 h-2 rounded-full ${theme.pulseColor} animate-pulse`}></span>
+            <div className={`as-control hidden sm:flex items-center gap-2 px-2.5 text-xs font-semibold border ${theme.badgeBg}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${theme.pulseColor}`} aria-hidden="true" />
               <span>{theme.badge}</span>
             </div>
           )}
-
-          {/* Session indicator. "Authenticated Session Active" requires that API
-              Gateway's JWT authorizer has accepted this token on a real
-              protected request — `isVerified`, not a local flag. */}
-          <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-bold shadow-2xs ${
-              isVerified
-                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
-                : 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800'
-            }`}
-            title={
-              isVerified
-                ? 'Authenticated Session Active — verified against the AeroSense API authorizer'
-                : 'Signed in to Cognito; awaiting confirmation from a protected API call'
-            }
-          >
-            {isVerified ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldAlert className="w-3.5 h-3.5" />}
-            <span className="hidden lg:inline">
-              {isVerified ? 'Authenticated Session Active' : 'Verifying session…'}
-            </span>
-            <span className="lg:hidden">{isVerified ? 'Verified' : 'Verifying…'}</span>
-            {session?.displayName && (
-              <span className="font-mono text-[10px] opacity-80 max-w-[140px] truncate" title={session.displayName}>
-                {session.displayName}
-              </span>
-            )}
-          </div>
-
-          <button
-            onClick={onSignOut}
-            disabled={isAuthBusy}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 dark:hover:bg-rose-950/50 dark:hover:text-rose-300 text-xs font-bold shadow-2xs transition-all active:scale-95 disabled:opacity-50"
-            title="Sign out of AeroSense"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{isAuthBusy ? 'Signing out…' : 'Sign out'}</span>
-          </button>
-
-          {/* Dark / Light Theme Toggle */}
-          <button
-            onClick={handleToggleTheme}
-            className="p-1.5 sm:px-2.5 sm:py-1 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-white/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-700 text-xs font-bold shadow-2xs transition-all active:scale-95"
-            title={isDarkMode ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
-          >
-            {isDarkMode ? (
-              <Sun className="w-4 h-4 text-amber-400" />
-            ) : (
-              <Moon className="w-4 h-4 text-indigo-600" />
-            )}
-          </button>
         </div>
       </div>
     </header>
+  );
+}
+
+function ModeButton({ active, onClick, icon: Icon, label, title, live = false }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      className={`as-focus h-full px-2.5 rounded-[0.5rem] text-[11px] font-bold flex items-center gap-1 transition ${
+        active
+          ? live
+            ? 'bg-teal-600 text-white shadow-sm'
+            : 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+      }`}
+    >
+      <Icon className="w-3 h-3" aria-hidden="true" />
+      <span>{label}</span>
+    </button>
   );
 }

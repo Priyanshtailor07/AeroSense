@@ -49,7 +49,7 @@ export default function ScientificOverview() {
               d[PM₂.₅]/dt = (Q_fresh·PM_out)/V - ((Q·η_hepa + Q_dep)/V)·PM_in + leak
             </div>
             <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-tight">
-              HEPA efficiency η = 99.97% at 0.3 µm MPPS, envelope infiltration leak, and surface deposition.
+              Modelled HEPA efficiency η = 99.97% at 0.3 µm MPPS (H13 reference spec), envelope infiltration, and surface deposition.
             </p>
           </div>
           <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-500 mt-2 block">

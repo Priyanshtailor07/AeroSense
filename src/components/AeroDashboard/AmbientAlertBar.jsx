@@ -1,6 +1,46 @@
 import React from 'react';
-import { Droplets, ShieldCheck, Wind, Sparkles, ArrowRight, ShieldAlert, Zap, Server, AlertTriangle } from 'lucide-react';
+import { Droplets, ShieldCheck, Wind, ArrowRight, Server, Radio, Bell } from 'lucide-react';
 import { THEME_MODES } from '../../utils/themeEngine';
+import { formatNumber } from '../../utils/formatNumber';
+
+/**
+ * Ambient condition strip and secondary notification list.
+ *
+ * Alert hierarchy: App owns the single primary active-hazard banner at the top
+ * of the page, including the alarm controls. This component is deliberately
+ * quiet — it previously rendered its own flashing `alert-flash-banner`, so a
+ * hazard produced two competing red banners with separately-tracked alarm
+ * state. It now reports conditions and lists backend notifications, and never
+ * claims an alarm state of its own.
+ */
+
+const SEVERITY = {
+  critical: {
+    label: 'Critical',
+    dot: 'bg-rose-500',
+    chip: 'text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-900',
+  },
+  warning: {
+    label: 'Warning',
+    dot: 'bg-amber-500',
+    chip: 'text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-900',
+  },
+  info: {
+    label: 'Info',
+    dot: 'bg-slate-400',
+    chip: 'text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700',
+  },
+};
+
+/** Only renders a time when the record actually carried one. */
+function alertTime(alert) {
+  if (!alert?.timestampMs) return null;
+  try {
+    return new Date(alert.timestampMs).toLocaleTimeString();
+  } catch {
+    return null;
+  }
+}
 
 export default function AmbientAlertBar({
   theme,
@@ -9,148 +49,128 @@ export default function AmbientAlertBar({
   pm25,
   onOpenHepa,
   mode = 'simulation',
-  // No fabricated label: the API returns ids such as "zone-01" and no names.
   selectedZone = null,
-  isApiLoading = false,
-  isStale = false,
-  lastUpdated = null,
   liveAlerts = [],
 }) {
-  const isAlert = theme.mode === THEME_MODES.ALERT || (liveAlerts && liveAlerts.length > 0);
+  const alerts = Array.isArray(liveAlerts) ? liveAlerts : [];
+  const isLive = mode === 'aws_live';
 
-  const getIcon = () => {
-    if (isAlert) {
-      return <ShieldAlert className="w-6 h-6 text-white animate-bounce" />;
-    }
-    switch (theme.mode) {
-      case THEME_MODES.RAIN:
-        return <Droplets className="w-5 h-5 text-sky-600 animate-pulse" />;
-      case THEME_MODES.CLEAN:
-        return <ShieldCheck className="w-5 h-5 text-emerald-600" />;
-      default:
-        return <Wind className="w-5 h-5 text-amber-600" />;
-    }
-  };
+  const ConditionIcon =
+    theme.mode === THEME_MODES.RAIN ? Droplets : theme.mode === THEME_MODES.CLEAN ? ShieldCheck : Wind;
 
-  const activeAlertMsg = liveAlerts && liveAlerts.length > 0 ? liveAlerts[0].message : null;
+  const iconTone =
+    theme.mode === THEME_MODES.RAIN
+      ? 'text-sky-600 dark:text-sky-400'
+      : theme.mode === THEME_MODES.CLEAN
+      ? 'text-emerald-600 dark:text-emerald-400'
+      : 'text-amber-600 dark:text-amber-400';
 
   return (
-    <div
-      className={`w-full rounded-2xl transition-all duration-500 relative overflow-hidden shadow-lg ${
-        isAlert
-          ? 'alert-flash-banner p-5 text-white border-2 border-rose-400 shadow-rose-500/30'
-          : `glass-panel p-4 border ${theme.cardBorder} dark:border-slate-800`
-      }`}
+    <section
+      aria-label="Ambient conditions and notifications"
+      className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm overflow-hidden"
     >
-      {/* Background ambient glow */}
-      <div
-        className={`absolute -right-20 -top-20 w-64 h-64 rounded-full opacity-30 blur-3xl pointer-events-none transition-colors duration-700 ${
-          isAlert
-            ? 'bg-rose-600'
-            : theme.mode === THEME_MODES.RAIN
-            ? 'bg-sky-500'
-            : theme.mode === THEME_MODES.CLEAN
-            ? 'bg-emerald-500'
-            : 'bg-amber-500'
-        }`}
-      />
-
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative z-10">
-        <div className="flex items-center gap-3.5">
-          <div
-            className={`p-2.5 rounded-xl flex items-center justify-center shadow-md ${
-              isAlert ? 'bg-rose-950/80 border border-rose-400' : theme.badgeBg
-            }`}
-          >
-            {getIcon()}
+      {/* Condition summary */}
+      <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center gap-4 justify-between">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 shrink-0">
+            <ConditionIcon className={`w-5 h-5 ${iconTone}`} aria-hidden="true" />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="as-section-title text-sm text-slate-900 dark:text-white">{theme.label}</h2>
               <span
-                className={`font-black text-base tracking-tight ${
-                  isAlert ? 'text-white' : 'text-slate-900 dark:text-white'
+                className={`as-label px-2 py-0.5 rounded-md border ${
+                  isLive
+                    ? 'text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-900'
+                    : 'text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-900'
                 }`}
               >
-                {activeAlertMsg ? 'AWS Telemetry Alert' : theme.label}
+                {isLive ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Server className="w-3 h-3" aria-hidden="true" />
+                    AWS Live{selectedZone ? ` · ${selectedZone}` : ''}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1">
+                    <Radio className="w-3 h-3" aria-hidden="true" />
+                    Simulated
+                  </span>
+                )}
               </span>
-              <span
-                className={`text-xs px-2.5 py-0.5 rounded-full font-black uppercase tracking-wider border shadow-xs ${
-                  isAlert ? 'bg-white text-rose-800 border-white' : theme.badgeBg
-                }`}
-              >
-                {activeAlertMsg ? 'BACKEND ANOMALY' : theme.badge}
-              </span>
-              {mode === 'aws_live' && (
-                <span className="text-[10px] font-mono font-extrabold px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700 flex items-center gap-1">
-                  <Server className="w-3 h-3 text-emerald-400" />
-                  <span>AWS Live{selectedZone ? ` \u00b7 ${selectedZone}` : ''}</span>
-                </span>
-              )}
-              {isAlert && (
-                <span className="flex h-3 w-3 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-80"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-300"></span>
-                </span>
-              )}
             </div>
-            <p
-              className={`text-xs mt-0.5 max-w-2xl font-medium ${
-                isAlert ? 'text-rose-100' : 'text-slate-600 dark:text-slate-300'
-              }`}
-            >
-              {activeAlertMsg || theme.sublabel}
-            </p>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">{theme.sublabel}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto justify-end">
-          <div
-            className={`hidden sm:flex items-center gap-3 text-xs font-bold px-3 py-1.5 rounded-xl border shadow-xs ${
-              isAlert
-                ? 'bg-black/40 text-white border-white/20'
-                : 'bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 border-slate-200/80 dark:border-slate-700'
-            }`}
-          >
-            <span>
-              AQI:{' '}
-              <strong className={isAlert ? 'text-rose-300 font-mono text-sm' : 'text-slate-900 dark:text-white'}>
-                {aqi}
-              </strong>
-            </span>
-            <span className="opacity-40">•</span>
-            <span>
-              RH:{' '}
-              <strong className={isAlert ? 'text-sky-300 font-mono' : 'text-slate-900 dark:text-white'}>
-                {humidity}%
-              </strong>
-            </span>
-            <span className="opacity-40">•</span>
-            <span>
-              PM2.5:{' '}
-              <strong className={isAlert ? 'text-amber-300 font-mono' : 'text-slate-900 dark:text-white'}>
-                {pm25} µg/m³
-              </strong>
-            </span>
-          </div>
+        {/* Key readings. Outdoor and indoor are labelled separately because
+            they come from different sources and must not read as one place. */}
+        <div className="flex items-center gap-4 flex-wrap shrink-0">
+          <Reading
+            label="Outdoor AQI"
+            value={formatNumber(aqi, { digits: 0 })}
+            hint={isLive ? 'From the zone record' : 'Simulated'}
+          />
+          <Reading label="Indoor PM2.5" value={formatNumber(pm25, { digits: 1 })} unit="µg/m³" />
+          <Reading label="Humidity" value={formatNumber(humidity, { digits: 0 })} unit="%" />
 
           <button
             onClick={onOpenHepa}
-            className={`flex items-center gap-2 text-xs font-black px-4 py-2.5 rounded-xl transition-all shadow-md active:scale-95 group shrink-0 ${
-              isAlert
-                ? 'bg-white text-rose-950 hover:bg-rose-50 shadow-rose-900/40'
-                : 'bg-slate-900 dark:bg-emerald-600 text-white hover:bg-slate-800 dark:hover:bg-emerald-500'
-            }`}
+            className="as-control as-focus inline-flex items-center gap-2 px-3.5 text-xs font-bold bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-white active:scale-[0.98] transition shrink-0"
           >
-            {isAlert ? (
-              <Zap className="w-4 h-4 text-rose-600 animate-pulse" />
-            ) : (
-              <Sparkles className="w-3.5 h-3.5 text-emerald-400 dark:text-white group-hover:rotate-12 transition-transform" />
-            )}
-            <span>{isAlert ? 'Engage Emergency HEPA' : '3D HEPA Chamber'}</span>
-            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+            <span>Open 3D HEPA view</span>
+            <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
           </button>
         </div>
       </div>
+
+      {/* Secondary notifications: the backend's own alert strings. */}
+      {alerts.length > 0 && (
+        <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/40">
+          <div className="px-4 sm:px-5 py-2.5 flex items-center gap-2">
+            <Bell className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" aria-hidden="true" />
+            <h3 className="as-label">
+              Notifications from AWS{selectedZone ? ` · ${selectedZone}` : ''} ({alerts.length})
+            </h3>
+          </div>
+          <ul className="px-4 sm:px-5 pb-3 space-y-1.5 max-h-40 overflow-y-auto">
+            {alerts.slice(0, 6).map((alert) => {
+              const tone = SEVERITY[alert.severity] || SEVERITY.info;
+              const time = alertTime(alert);
+              return (
+                <li
+                  key={alert.id}
+                  className="flex items-start gap-2.5 text-xs text-slate-700 dark:text-slate-300"
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${tone.dot}`} aria-hidden="true" />
+                  <span className={`as-label px-1.5 py-0.5 rounded border shrink-0 ${tone.chip}`}>{tone.label}</span>
+                  <span className="min-w-0 flex-1 break-words">{alert.message}</span>
+                  {/* Shown only when the record carried a timestamp. */}
+                  {time && (
+                    <time className="font-mono text-[10px] text-slate-400 dark:text-slate-500 shrink-0 hidden sm:block">
+                      {time}
+                    </time>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Reading({ label, value, unit, hint }) {
+  return (
+    <div className="min-w-0">
+      <p className="as-label" title={hint || undefined}>
+        {label}
+      </p>
+      <p className="font-mono font-bold text-slate-900 dark:text-white text-sm tabular-nums whitespace-nowrap">
+        {value}
+        {unit && <span className="text-[11px] font-sans font-medium text-slate-500 dark:text-slate-400 ml-0.5">{unit}</span>}
+      </p>
     </div>
   );
 }

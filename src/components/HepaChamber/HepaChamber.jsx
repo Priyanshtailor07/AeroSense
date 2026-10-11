@@ -46,33 +46,35 @@ export default function HepaChamber() {
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 relative z-10">
           <div className="space-y-1.5">
             <div className="flex items-center gap-3">
-              <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                True HEPA H13 Grade Media
+              <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-slate-700/60 text-slate-300 border border-slate-600 flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
+                Illustrative model
               </span>
-              <span className="text-xs text-slate-400 font-mono">EN 1822 Standard</span>
+              <span className="text-xs text-slate-400 font-mono">H13 reference parameters (EN 1822)</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white flex items-center gap-2">
               Inside the 3D Mechanical Chamber
             </h1>
             <p className="text-sm text-slate-300 max-w-2xl leading-relaxed">
-              Explore how sub-micron particulates and airborne pathogens are aerodynamically captured across 
-              <strong> 32 continuous zig-zag pleats</strong> with zero bypass leakage.
+              A visualisation of how sub-micron particulates are captured across a pleated filter element.
+              The geometry and the figures below are <strong>model parameters</strong> taken from published
+              H13 reference specifications — they describe this simulation, not a measurement of installed
+              equipment, and bypass leakage is not modelled.
             </p>
           </div>
 
           {/* Quick Efficiency Stats Pill */}
           <div className="flex items-center gap-4 bg-slate-900/90 p-4 rounded-xl border border-slate-800 shrink-0">
             <div>
-              <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Trapping Rate</div>
+              <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Modelled rate</div>
               <div className="text-2xl font-black text-emerald-400 font-mono tracking-tight">99.97%</div>
-              <div className="text-[10px] text-slate-400 font-mono">at 0.3 µm MPPS</div>
+              <div className="text-[10px] text-slate-400 font-mono">at 0.3 µm MPPS (H13 spec)</div>
             </div>
             <div className="h-10 w-px bg-slate-800"></div>
             <div>
-              <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Active Pleats</div>
-              <div className="text-2xl font-black text-cyan-400 font-mono tracking-tight">32 Folds</div>
-              <div className="text-[10px] text-slate-400 font-mono">Borosilicate Web</div>
+              <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Pleats rendered</div>
+              <div className="text-2xl font-black text-cyan-400 font-mono tracking-tight">32</div>
+              <div className="text-[10px] text-slate-400 font-mono">Geometry parameter</div>
             </div>
           </div>
         </div>
