@@ -30,6 +30,7 @@ export default function App() {
   const [temp, setTemp] = useState(22);
   /** Metric keys the API did not supply for the current record. */
   const [unavailableMetrics, setUnavailableMetrics] = useState([]);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
 
   // Additional AWS Live Telemetry & Optimizer State.
   // The five metrics the BuildingTelemetry API does not publish start as null
@@ -436,11 +437,11 @@ export default function App() {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto relative z-10">
+      <div className="max-w-7xl mx-auto relative z-10 min-w-0">
         {/* 2. Hazard Alert Banner */}
         {isHazard && (
           <div
-            className={`w-full rounded-2xl p-3.5 sm:p-4 text-white shadow-2xl border-2 mb-4 flex flex-col md:flex-row items-center justify-between gap-3.5 transition-all ${
+            className={`w-full rounded-2xl p-3.5 sm:p-4 text-white shadow-2xl border-2 mb-3 flex flex-col md:flex-row items-center justify-between gap-3.5 transition-all ${
               showScreenStrobe ? 'alert-flash-banner border-white/80' : 'bg-slate-900/90 border-slate-700'
             }`}
           >
@@ -509,7 +510,7 @@ export default function App() {
 
         {/* 3a. Simulation mode is demo data and says so unmistakably. */}
         {mode === 'simulation' && (
-          <div className="w-full rounded-2xl p-3 bg-indigo-500/10 border border-indigo-500/40 text-indigo-900 dark:text-indigo-200 mb-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="w-full rounded-2xl p-3 bg-indigo-500/10 border border-indigo-500/40 text-indigo-900 dark:text-indigo-200 mb-3 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <ShieldOff className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
               <div className="text-xs">
@@ -530,7 +531,7 @@ export default function App() {
 
         {/* 3b. AWS Connection & Stale Error Banner */}
         {mode === 'aws_live' && apiError && (
-          <div className="w-full rounded-2xl p-3 sm:p-4 bg-amber-500/15 border border-amber-500/40 text-amber-900 dark:text-amber-200 mb-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
+          <div className="w-full rounded-2xl p-3 sm:p-4 bg-amber-500/15 border border-amber-500/40 text-amber-900 dark:text-amber-200 mb-3 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
             <div className="flex items-center gap-2.5">
               <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
               <div className="text-xs">
@@ -576,21 +577,24 @@ export default function App() {
           </div>
         )}
 
-        {/* 3c. The API publishes a subset of what this dashboard can display.
-                Say which metrics are not live rather than showing a default. */}
-        {mode === 'aws_live' && hasLiveData && unavailableMetrics.length > 0 && (
-          <div className="w-full rounded-2xl p-3 bg-slate-500/10 border border-slate-400/40 text-slate-700 dark:text-slate-300 mb-4 flex items-start gap-2.5">
-            <Info className="w-4 h-4 mt-0.5 shrink-0 text-slate-500 dark:text-slate-400" />
-            <div className="text-xs leading-relaxed">
-              <span className="font-extrabold uppercase tracking-wide">Not published by this API: </span>
-              <span>
-                {UNPUBLISHED_METRICS.filter((m) => unavailableMetrics.includes(m.key))
-                  .map((m) => m.label)
-                  .join(', ')}
-                . These appear as <span className="font-mono font-bold">n/a</span> in AWS Live because the
-                BuildingTelemetry records do not contain them. They are not estimated or carried over.
-              </span>
-            </div>
+        {/* 3c. Which metrics the API does not publish. Compact and dismissible:
+                each card already shows N/A, so a permanent banner is noise. */}
+        {mode === 'aws_live' && hasLiveData && !noticeDismissed && unavailableMetrics.length > 0 && (
+          <div className="w-full rounded-xl px-3 py-2 bg-slate-500/10 border border-slate-400/30 text-slate-600 dark:text-slate-400 mb-3 flex items-center gap-2">
+            <Info className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <p className="text-[11px] leading-snug min-w-0 flex-1">
+              <span className="font-bold">Shown as N/A</span> — not published by this API:{' '}
+              {UNPUBLISHED_METRICS.filter((m) => unavailableMetrics.includes(m.key))
+                .map((m) => m.label)
+                .join(', ')}
+              .
+            </p>
+            <button
+              onClick={() => setNoticeDismissed(true)}
+              className="shrink-0 text-[11px] font-bold hover:underline focus:outline-none focus:ring-2 focus:ring-slate-400 rounded px-1"
+            >
+              Dismiss
+            </button>
           </div>
         )}
 

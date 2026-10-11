@@ -35,14 +35,59 @@ export function getAuthConfig() {
   const apiBaseUrl = (import.meta.env.VITE_AEROSENSE_API_URL || '').trim().replace(/\/+$/, '');
   const tokenType = (import.meta.env.VITE_COGNITO_TOKEN_TYPE || 'access').trim().toLowerCase();
 
+  // Registration policy. This mirrors ALLOW_SELF_SIGNUP on the auth Lambda,
+  // which is the real gate: the browser flag only decides whether to offer the
+  // form, and a disabled backend still answers SIGNUP_DISABLED.
+  const allowSelfSignup = String(import.meta.env.VITE_ALLOW_SELF_SIGNUP ?? 'true').trim() !== 'false';
+
   return {
     region,
     userPoolId,
     clientId,
     apiBaseUrl,
     tokenType: tokenType === 'id' ? 'id' : 'access',
+    allowSelfSignup,
     issuer: userPoolId ? `https://cognito-idp.${region}.amazonaws.com/${userPoolId}` : '',
   };
+}
+
+/**
+ * The Cognito password policy for this pool, used to tell the user the rules
+ * before they submit rather than after Cognito rejects the password.
+ */
+export const PASSWORD_POLICY = Object.freeze({
+  minLength: 8,
+  requireUppercase: true,
+  requireLowercase: true,
+  requireNumbers: true,
+  requireSymbols: true,
+});
+
+/** Check a candidate password against the pool policy. */
+export function checkPassword(password) {
+  const value = typeof password === 'string' ? password : '';
+  const rules = [
+    { id: 'length', label: `At least ${PASSWORD_POLICY.minLength} characters`, met: value.length >= PASSWORD_POLICY.minLength },
+    { id: 'upper', label: 'An uppercase letter', met: /[A-Z]/.test(value) },
+    { id: 'lower', label: 'A lowercase letter', met: /[a-z]/.test(value) },
+    { id: 'number', label: 'A number', met: /[0-9]/.test(value) },
+    { id: 'symbol', label: 'A symbol', met: /[^A-Za-z0-9]/.test(value) },
+  ];
+  return { rules, valid: rules.every((r) => r.met) };
+}
+
+/** Pragmatic email check; Cognito performs the authoritative validation. */
+export function isValidEmail(value) {
+  return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value.trim());
+}
+
+/** Mask an email for display: "operator@example.com" -> "op\u2022\u2022\u2022\u2022or@example.com". */
+export function maskEmail(email) {
+  if (typeof email !== 'string' || !email.includes('@')) return email || '';
+  const [local, domain] = email.split('@');
+  if (local.length <= 2) return `${local[0] || ''}\u2022\u2022\u2022@${domain}`;
+  if (local.length <= 4) return `${local[0]}\u2022\u2022\u2022${local.slice(-1)}@${domain}`;
+  return `${local.slice(0, 2)}\u2022\u2022\u2022\u2022${local.slice(-2)}@${domain}`;
 }
 
 /**
@@ -468,9 +513,16 @@ export async function confirmForgotPassword(username, code, newPassword) {
   return data.message || 'Password updated. You can now sign in.';
 }
 
+/**
+ * Confirm an account with the emailed code. On success the account is usable,
+ * but the user is NOT signed in: confirmation is not authentication.
+ */
 export async function confirmSignUp(username, code) {
   const data = await postAuth('confirm-signup', { username, code });
-  return data.message || 'Account confirmed. You can now sign in.';
+  return {
+    status: 'CONFIRMED',
+    message: data.message || 'Account confirmed. You can now sign in.',
+  };
 }
 
 export async function resendConfirmationCode(username) {
@@ -478,9 +530,23 @@ export async function resendConfirmationCode(username) {
   return data.message || 'A new confirmation code has been sent.';
 }
 
+/**
+ * Register a new account.
+ *
+ * Returns an explicit status so the UI never has to infer one:
+ *   PENDING_CONFIRMATION - created, awaiting the emailed code
+ *   CONFIRMED            - created and already usable (auto-confirmed pool)
+ *
+ * Neither status means the user is authenticated. A sign-in must still happen.
+ */
 export async function signUp(username, password, email) {
   const data = await postAuth('signup', { username, password, email });
-  return { userConfirmed: Boolean(data.userConfirmed), message: data.message };
+  const userConfirmed = Boolean(data.userConfirmed);
+  return {
+    status: userConfirmed ? 'CONFIRMED' : 'PENDING_CONFIRMATION',
+    userConfirmed,
+    message: data.message,
+  };
 }
 
 /** Test seam: reset all module state between tests. */

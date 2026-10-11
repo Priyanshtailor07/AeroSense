@@ -13,7 +13,8 @@ export default function Navbar({
   mode = 'simulation',
   setMode,
   zones = [],
-  selectedZone = 'Zone-1',
+  // No fabricated label: the API returns ids such as "zone-01" and no names.
+  selectedZone = null,
   setSelectedZone,
   isApiLoading = false,
   isStale = false,
@@ -144,15 +145,25 @@ export default function Navbar({
         </nav>
 
         {/* Right Controls: Zone Selector, AWS Connection Status, Auth & Theme Toggle */}
-        <div className="flex items-center gap-2 flex-wrap justify-end w-full lg:w-auto">
+        <div className="flex items-center gap-2 flex-wrap justify-end w-full lg:w-auto min-w-0">
           {/* AWS Zone Selector (Only visible in AWS Live mode) */}
+          {/* Zone selector. Labels come from the API; it returns ids like
+              "zone-01" and no names, so the id is shown as-is. */}
           {mode === 'aws_live' && zones && zones.length > 0 && (
-            <div className="flex items-center gap-1 bg-white/80 dark:bg-slate-800 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
-              <Layers className="w-3.5 h-3.5 text-indigo-500" />
+            <div className="flex items-center gap-1.5 bg-white/90 dark:bg-slate-800 pl-2.5 pr-1.5 py-1 rounded-xl border border-indigo-300 dark:border-indigo-800 text-xs shadow-2xs">
+              <Layers className="w-3.5 h-3.5 text-indigo-500 shrink-0" aria-hidden="true" />
+              <label htmlFor="zone-select" className="sr-only">
+                Telemetry zone
+              </label>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 hidden sm:inline">
+                Zone
+              </span>
               <select
-                value={selectedZone}
+                id="zone-select"
+                value={selectedZone || ''}
                 onChange={(e) => setSelectedZone && setSelectedZone(e.target.value)}
-                className="bg-transparent text-xs font-bold text-slate-900 dark:text-slate-100 focus:outline-none cursor-pointer"
+                disabled={zones.length <= 1}
+                className="bg-transparent text-xs font-mono font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded cursor-pointer disabled:cursor-default py-0.5"
               >
                 {zones.map((z) => (
                   <option key={z.zone_id} value={z.zone_id} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
@@ -173,14 +184,18 @@ export default function Navbar({
               }`}
             >
               {isApiLoading ? (
-                <RefreshCw className="w-3 h-3 animate-spin text-emerald-600 dark:text-emerald-400" />
+                <RefreshCw className="w-3 h-3 animate-spin text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
               ) : isStale ? (
-                <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400" aria-hidden="true" />
               ) : (
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" aria-hidden="true" />
               )}
-              <span>{isStale ? 'STALE' : isApiLoading ? 'POLLING...' : 'AWS LIVE'}</span>
-              {lastUpdated && <span className="opacity-60 hidden sm:inline">({lastUpdated})</span>}
+              <span>{isStale ? 'STALE' : isApiLoading ? 'SYNCING' : 'AWS LIVE'}</span>
+              {lastUpdated && (
+                <span className="opacity-60 hidden md:inline font-normal" title="Time of the last successful poll">
+                  {lastUpdated}
+                </span>
+              )}
             </div>
           ) : (
             <div className={`flex items-center gap-2 px-3 py-1 rounded-xl border text-xs font-semibold ${theme.badgeBg}`}>
@@ -205,9 +220,10 @@ export default function Navbar({
             }
           >
             {isVerified ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldAlert className="w-3.5 h-3.5" />}
-            <span className="hidden sm:inline">
+            <span className="hidden lg:inline">
               {isVerified ? 'Authenticated Session Active' : 'Verifying session…'}
             </span>
+            <span className="lg:hidden">{isVerified ? 'Verified' : 'Verifying…'}</span>
             {session?.displayName && (
               <span className="font-mono text-[10px] opacity-80 max-w-[140px] truncate" title={session.displayName}>
                 {session.displayName}

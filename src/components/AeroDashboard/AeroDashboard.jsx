@@ -42,7 +42,8 @@ export default function AeroDashboard({
   sparklines = {},
   liveAlerts = [],
   mode = 'simulation',
-  selectedZone = 'Zone-1',
+  // No fabricated label: the API returns ids such as "zone-01" and no names.
+  selectedZone = null,
   isApiLoading = false,
   isStale = false,
   lastUpdated = null,

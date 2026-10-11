@@ -23,6 +23,7 @@ import {
   onAuthStateChanged,
   hasRestorableSession,
   getConfigError,
+  getAuthConfig,
   forgotPassword as cognitoForgotPassword,
   confirmForgotPassword as cognitoConfirmForgotPassword,
   confirmSignUp as cognitoConfirmSignUp,
@@ -48,6 +49,7 @@ export function AuthProvider({ children }) {
   const [challenge, setChallenge] = useState(null);
 
   const configError = useMemo(() => getConfigError(), []);
+  const allowSelfSignup = useMemo(() => getAuthConfig().allowSelfSignup, []);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -224,6 +226,8 @@ export function AuthProvider({ children }) {
       error,
       challenge,
       configError,
+      /** Whether to offer self-registration. The Lambda is the real gate. */
+      allowSelfSignup,
       isAuthenticated: status === AUTH_STATUS.AUTHENTICATED && Boolean(session),
       /** Server-verified: API Gateway's authorizer has accepted this token. */
       isVerified: status === AUTH_STATUS.AUTHENTICATED && Boolean(session?.verifiedAt),
@@ -240,7 +244,7 @@ export function AuthProvider({ children }) {
       resendConfirmationCode: cognitoResendConfirmationCode,
       signUp: cognitoSignUp,
     }),
-    [status, session, error, challenge, configError, login, logout, completeChallenge, cancelChallenge, clearError, initialize]
+    [status, session, error, challenge, configError, allowSelfSignup, login, logout, completeChallenge, cancelChallenge, clearError, initialize]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

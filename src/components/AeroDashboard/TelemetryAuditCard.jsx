@@ -17,7 +17,8 @@ export default function TelemetryAuditCard({
   controlMode = 'ai',
   mode = 'simulation',
   recommendationOnly = true,
-  selectedZone = 'Zone-1',
+  // No fabricated label: the API returns ids such as "zone-01" and no names.
+  selectedZone = null,
 }) {
   const getFanBadge = () => {
     // An unavailable fan speed must not be reported as any operating mode.
@@ -50,7 +51,7 @@ export default function TelemetryAuditCard({
   const getReasoningBadge = () => {
     if (mode === 'aws_live') {
       return {
-        label: `AWS LIVE DYNAMODB OPTIMIZER (${selectedZone})`,
+        label: selectedZone ? `AWS LIVE OPTIMIZER \u00b7 ${selectedZone}` : 'AWS LIVE OPTIMIZER',
         color: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-800',
       };
     }

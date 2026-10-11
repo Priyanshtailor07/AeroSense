@@ -80,7 +80,7 @@ describe('invalid credentials', () => {
     renderGuarded();
 
     const user = userEvent.setup();
-    await user.type(await screen.findByLabelText(/username or email/i), 'operator');
+    await user.type(await screen.findByLabelText(/email address/i), 'operator@example.com');
     await user.type(screen.getByLabelText(/^password$/i), 'wrong-password');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
 
@@ -96,7 +96,7 @@ describe('invalid credentials', () => {
     renderGuarded();
 
     const user = userEvent.setup();
-    await user.type(await screen.findByLabelText(/username or email/i), 'operator');
+    await user.type(await screen.findByLabelText(/email address/i), 'operator@example.com');
     await user.type(screen.getByLabelText(/^password$/i), 'pw');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
 
@@ -111,7 +111,7 @@ describe('valid credentials', () => {
     renderGuarded();
 
     const user = userEvent.setup();
-    await user.type(await screen.findByLabelText(/username or email/i), 'operator');
+    await user.type(await screen.findByLabelText(/email address/i), 'operator@example.com');
     await user.type(screen.getByLabelText(/^password$/i), 'Passw0rd!');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
 
@@ -122,23 +122,23 @@ describe('valid credentials', () => {
   it('holds the dashboard shut while Cognito raises a challenge', async () => {
     fetchMock.on('/auth/signin', jsonResponse({
       ok: true,
-      challenge: { challengeName: 'NEW_PASSWORD_REQUIRED', session: 'sess', username: 'operator' },
+      challenge: { challengeName: 'NEW_PASSWORD_REQUIRED', session: 'sess', username: 'operator@example.com' },
     }));
     renderGuarded();
 
     const user = userEvent.setup();
-    await user.type(await screen.findByLabelText(/username or email/i), 'operator');
+    await user.type(await screen.findByLabelText(/email address/i), 'operator@example.com');
     await user.type(screen.getByLabelText(/^password$/i), 'Temp1234!');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
 
-    expect(await screen.findByText(/additional verification required/i)).toBeInTheDocument();
+    expect(await screen.findByText(/additional verification/i)).toBeInTheDocument();
     expect(screen.queryByText(DASHBOARD)).not.toBeInTheDocument();
   });
 });
 
 describe('page refresh', () => {
   it('restores a valid session and reopens the dashboard', async () => {
-    sessionStorage.setItem('aerosense_refresh', JSON.stringify({ refreshToken: 'good', username: 'operator' }));
+    sessionStorage.setItem('aerosense_refresh', JSON.stringify({ refreshToken: 'good', username: 'operator@example.com' }));
     fetchMock.on('/auth/refresh', jsonResponse({ ok: true, session: makeSessionPayload() }));
 
     renderGuarded();
@@ -147,7 +147,7 @@ describe('page refresh', () => {
   });
 
   it('shows the branded loading screen while the session is verified', async () => {
-    sessionStorage.setItem('aerosense_refresh', JSON.stringify({ refreshToken: 'good', username: 'operator' }));
+    sessionStorage.setItem('aerosense_refresh', JSON.stringify({ refreshToken: 'good', username: 'operator@example.com' }));
     let release;
     fetchMock.on('/auth/refresh', () => new Promise((resolve) => {
       release = () => resolve(jsonResponse({ ok: true, session: makeSessionPayload() }));
@@ -163,7 +163,7 @@ describe('page refresh', () => {
   });
 
   it('returns to login when the stored session is expired or revoked', async () => {
-    sessionStorage.setItem('aerosense_refresh', JSON.stringify({ refreshToken: 'stale', username: 'operator' }));
+    sessionStorage.setItem('aerosense_refresh', JSON.stringify({ refreshToken: 'stale', username: 'operator@example.com' }));
     fetchMock.on('/auth/refresh', jsonResponse({ ok: false, code: 'REFRESH_FAILED', message: 'expired' }, 401));
 
     renderGuarded();
@@ -178,7 +178,7 @@ describe('page refresh', () => {
 
 describe('logout', () => {
   it('clears state, returns to login, and unmounts the dashboard', async () => {
-    sessionStorage.setItem('aerosense_refresh', JSON.stringify({ refreshToken: 'good', username: 'operator' }));
+    sessionStorage.setItem('aerosense_refresh', JSON.stringify({ refreshToken: 'good', username: 'operator@example.com' }));
     fetchMock.on('/auth/refresh', jsonResponse({ ok: true, session: makeSessionPayload() }));
     fetchMock.on('/auth/signout', jsonResponse({ ok: true, revoked: { refreshToken: true } }));
 
@@ -194,7 +194,7 @@ describe('logout', () => {
   });
 
   it('blocks a back-navigation restore from revealing the dashboard', async () => {
-    sessionStorage.setItem('aerosense_refresh', JSON.stringify({ refreshToken: 'good', username: 'operator' }));
+    sessionStorage.setItem('aerosense_refresh', JSON.stringify({ refreshToken: 'good', username: 'operator@example.com' }));
     fetchMock.on('/auth/refresh', jsonResponse({ ok: true, session: makeSessionPayload() }));
     fetchMock.on('/auth/signout', jsonResponse({ ok: true, revoked: { refreshToken: true } }));
 

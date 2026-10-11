@@ -159,6 +159,51 @@ describe('AWS Live startup', () => {
   });
 });
 
+describe('real zone identifiers', () => {
+  it('uses the API zone id verbatim and invents no display name', async () => {
+    // The deployed API returns exactly this: ids only, no human-readable names.
+    fetchMock.on('/zones', jsonResponse({ count: 1, zones: ['zone-01'] }));
+    fetchMock.on('/telemetry/latest', jsonResponse(wrapItem(telemetry('zone-01', { aqi: 61, pm25: 12.4, co2: 702 }))));
+    fetchMock.on('/telemetry/history', jsonResponse({ zone_id: 'zone-01', items: [] }));
+    fetchMock.on('/alerts', jsonResponse({ count: 0, items: [] }));
+
+    await renderSignedIn();
+    await waitFor(() => expect(screen.getByTestId('zone')).toHaveTextContent('zone-01'));
+
+    const option = screen.getByRole('option', { name: 'zone-01' });
+    expect(option).toBeInTheDocument();
+    expect(option.value).toBe('zone-01');
+
+    // No fabricated building/room naming anywhere in the rendered output.
+    expect(screen.queryByText(/Main HVAC|Main Facility|Zone 1\b|Zone-1/)).not.toBeInTheDocument();
+  });
+
+  it('disables the selector when the API returns a single zone', async () => {
+    fetchMock.on('/zones', jsonResponse({ count: 1, zones: ['zone-01'] }));
+    fetchMock.on('/telemetry/latest', jsonResponse(wrapItem(telemetry('zone-01', { aqi: 61, pm25: 12.4, co2: 702 }))));
+    fetchMock.on('/telemetry/history', jsonResponse({ zone_id: 'zone-01', items: [] }));
+    fetchMock.on('/alerts', jsonResponse({ count: 0, items: [] }));
+
+    await renderSignedIn();
+    await waitFor(() => expect(screen.getByTestId('zone')).toHaveTextContent('zone-01'));
+    expect(screen.getByRole('combobox')).toBeDisabled();
+  });
+
+  it('shows an explicit empty state when a zone has no telemetry', async () => {
+    fetchMock.on('/zones', jsonResponse({ count: 1, zones: ['zone-01'] }));
+    // The telemetry Lambda answers 404 for a zone with no records.
+    fetchMock.on('/telemetry/latest', jsonResponse({ error: 'No telemetry found for this zone' }, 404));
+    fetchMock.on('/telemetry/history', jsonResponse({ zone_id: 'zone-01', items: [] }));
+    fetchMock.on('/alerts', jsonResponse({ count: 0, items: [] }));
+
+    await renderSignedIn();
+
+    expect(await screen.findByText(/no aws telemetry available/i)).toBeInTheDocument();
+    // An empty zone must not fall back to simulated readings.
+    expect(screen.queryByTestId('dashboard')).not.toBeInTheDocument();
+  });
+});
+
 describe('zone selection', () => {
   it('refetches telemetry, history and alerts for the newly selected zone', async () => {
     fetchMock.on('/zones', jsonResponse({ count: 2, zones: ['zone-01', 'zone-02'] }));

@@ -9,7 +9,8 @@ export default function AmbientAlertBar({
   pm25,
   onOpenHepa,
   mode = 'simulation',
-  selectedZone = 'Zone-1',
+  // No fabricated label: the API returns ids such as "zone-01" and no names.
+  selectedZone = null,
   isApiLoading = false,
   isStale = false,
   lastUpdated = null,
@@ -82,7 +83,7 @@ export default function AmbientAlertBar({
               {mode === 'aws_live' && (
                 <span className="text-[10px] font-mono font-extrabold px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700 flex items-center gap-1">
                   <Server className="w-3 h-3 text-emerald-400" />
-                  <span>AWS Live ({selectedZone})</span>
+                  <span>AWS Live{selectedZone ? ` \u00b7 ${selectedZone}` : ''}</span>
                 </span>
               )}
               {isAlert && (
